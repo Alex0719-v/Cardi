@@ -12,6 +12,8 @@ import SwiftData
 struct CardaApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
+            BusinessCard.self,
+            CardInfoField.self,
             Item.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
