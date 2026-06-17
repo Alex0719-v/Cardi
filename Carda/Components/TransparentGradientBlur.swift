@@ -17,9 +17,16 @@ struct TransparentGradientBlur: View {
     var width: CGFloat = CardaTheme.canvasWidth
     var height: CGFloat = 140
     var direction: Direction = .bottom
+    var tintColor: Color = CardaTheme.pageBackground
+    var tintOpacity: Double = 0.5
 
     var body: some View {
-        MaximumBackdropBlurMaterial()
+        ZStack {
+            MaximumBackdropBlurMaterial()
+
+            tintColor
+                .opacity(tintOpacity)
+        }
             .mask(
                 LinearGradient(
                     stops: maskStops,

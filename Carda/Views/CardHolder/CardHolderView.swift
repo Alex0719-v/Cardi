@@ -39,7 +39,11 @@ struct CardHolderView: View {
     @State private var isAddSheetPresented = false
     @State private var isContextMenuVisible = false
     @State private var saveMessage: String?
+    @State private var alphabetIndexRequest: AlphabetIndexRequest?
     @Namespace private var cardExpansionNamespace
+
+    private let groupedHeaderHeight: CGFloat = 20
+    private let groupedHeaderTransitionGap: CGFloat = 10
 
     var body: some View {
         GeometryReader { proxy in
@@ -53,18 +57,16 @@ struct CardHolderView: View {
                     contentForMode
                 }
 
-                if mode != .list && !cards.isEmpty {
-                    ContactAlphabetIndex()
-                        .position(x: 394, y: CardaTheme.canvasHeight / 2)
-                        .zIndex(4)
-
-                    TransparentGradientBlur(height: 140)
-                        .offset(y: 734)
-                        .zIndex(4)
-                }
-
                 topModeBar
                     .zIndex(5)
+
+                if mode != .list && !cards.isEmpty {
+                    ContactAlphabetIndex { letter in
+                        alphabetIndexRequest = AlphabetIndexRequest(letter: letter)
+                    }
+                        .position(x: 394, y: CardaTheme.canvasHeight / 2)
+                        .zIndex(6)
+                }
 
                 if isContextMenuVisible {
                     Color.clear
@@ -236,33 +238,104 @@ struct CardHolderView: View {
     }
 
     private var groupedCardContent: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
-                ForEach(groupedCards, id: \.title) { group in
-                    cardGroup(title: group.title, cards: group.cards)
+        ScrollViewReader { scrollProxy in
+            ZStack(alignment: .topLeading) {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14, pinnedViews: [.sectionHeaders]) {
+                        ForEach(groupedCards) { group in
+                            Section {
+                                VStack(spacing: 8) {
+                                    ForEach(group.cards) { card in
+                                        cardRowOrExpanded(card)
+                                    }
+                                }
+                                .padding(.top, -12)
+                            } header: {
+                                trackedGroupTitle(group.title)
+                            }
+                            .id(group.id)
+                        }
+                    }
+                    .frame(width: CardaTheme.canvasWidth, alignment: .leading)
+                    .padding(
+                        .bottom,
+                        CardaTheme.canvasHeight - 160 - 95 - groupedHeaderHeight
+                    )
                 }
+                .frame(
+                    width: CardaTheme.canvasWidth,
+                    height: CardaTheme.canvasHeight - 160 - 95,
+                    alignment: .top
+                )
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    Color.clear
+                        .frame(height: 12)
+                        .allowsHitTesting(false)
+                }
+                .offset(y: 160)
+                .scrollIndicators(.hidden)
+
+                TransparentGradientBlur(
+                    height: 63.255,
+                    direction: .top
+                )
+                .offset(y: 160)
+                .zIndex(1)
+
+                TransparentGradientBlur(height: 140)
+                    .offset(y: 734)
+                    .zIndex(1)
             }
-            .padding(.top, 172)
-            .padding(.bottom, 120)
+            .frame(
+                width: CardaTheme.canvasWidth,
+                height: CardaTheme.canvasHeight,
+                alignment: .topLeading
+            )
+            .overlayPreferenceValue(GroupedHeaderAnchorPreferenceKey.self) { headers in
+                GeometryReader { proxy in
+                    ForEach(headers, id: \.title) { header in
+                        let frame = proxy[header.bounds]
+                        groupTitle(header.title)
+                            .position(x: frame.midX, y: frame.midY)
+                    }
+                }
+                .allowsHitTesting(false)
+            }
+            .onChange(of: alphabetIndexRequest) { _, request in
+                guard
+                    let request,
+                    let targetID = groupedSectionID(for: request.letter)
+                else {
+                    return
+                }
+                scrollProxy.scrollTo(targetID, anchor: .top)
+            }
         }
-        .scrollIndicators(.hidden)
     }
 
-    private func cardGroup(title: String, cards: [BusinessCard]) -> some View {
-        VStack(alignment: .leading, spacing: 11) {
-            Text(title)
-                .font(groupTitleFont(for: title))
-                .foregroundStyle(Color.black)
-                .frame(height: 20, alignment: .leading)
-                .padding(.leading, 16)
-
-            VStack(spacing: 8) {
-                ForEach(cards) { card in
-                    cardRowOrExpanded(card)
-                }
+    private func trackedGroupTitle(_ title: String) -> some View {
+        groupTitle(title)
+            .anchorPreference(
+                key: GroupedHeaderAnchorPreferenceKey.self,
+                value: .bounds
+            ) {
+                [GroupedHeaderAnchor(title: title, bounds: $0)]
             }
-        }
-        .frame(width: CardaTheme.canvasWidth, alignment: .leading)
+            .opacity(0)
+    }
+
+    private func groupTitle(_ title: String) -> some View {
+        Text(title)
+            .font(groupTitleFont(for: title))
+            .foregroundStyle(Color.black)
+            .frame(width: CardaTheme.canvasWidth - 16, height: groupedHeaderHeight, alignment: .leading)
+            .padding(.leading, 16)
+            .frame(
+                width: CardaTheme.canvasWidth,
+                height: groupedHeaderHeight + groupedHeaderTransitionGap,
+                alignment: .topLeading
+            )
+            .allowsHitTesting(false)
     }
 
     @ViewBuilder
@@ -298,27 +371,34 @@ struct CardHolderView: View {
     }
 
     private var listModeContent: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                ForEach(Array(listRows.enumerated()), id: \.element.id) { index, row in
-                    Section {
-                        expandedListCards(row)
-                    } header: {
-                        listModeRow(row, showsTopSeparator: index > 0)
+        ScrollViewReader { scrollProxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    ForEach(Array(listRows.enumerated()), id: \.element.id) { index, row in
+                        Section {
+                            expandedListCards(row)
+                        } header: {
+                            listModeRow(
+                                row,
+                                showsTopSeparator: index > 0,
+                                scrollProxy: scrollProxy
+                            )
+                            .id(row.id)
+                        }
                     }
                 }
+                .frame(width: CardaTheme.canvasWidth, alignment: .leading)
+                .padding(.top, 27)
+                .padding(.bottom, 160)
             }
-            .frame(width: CardaTheme.canvasWidth, alignment: .leading)
-            .padding(.top, 27)
-            .padding(.bottom, 160)
+            .frame(
+                width: CardaTheme.canvasWidth,
+                height: CardaTheme.canvasHeight - 160 - 95,
+                alignment: .top
+            )
+            .offset(y: 160)
+            .scrollIndicators(.hidden)
         }
-        .frame(
-            width: CardaTheme.canvasWidth,
-            height: CardaTheme.canvasHeight - 160 - 95,
-            alignment: .top
-        )
-        .offset(y: 160)
-        .scrollIndicators(.hidden)
     }
 
     private func expandedListCards(_ row: HolderListRow) -> some View {
@@ -326,8 +406,7 @@ struct CardHolderView: View {
 
         return VStack(spacing: 8) {
             ForEach(cardsForList(row)) { card in
-                CollapsedCardRow(data: card.renderData)
-                    .frame(width: CardaTheme.canvasWidth, alignment: .center)
+                cardRowOrExpanded(card)
             }
         }
         .padding(.top, 8)
@@ -345,15 +424,37 @@ struct CardHolderView: View {
 
     private func expandedListContentHeight(for row: HolderListRow) -> CGFloat {
         guard !row.cards.isEmpty else { return 0 }
-        let cardHeights = CGFloat(row.cards.count) * 60
+        let cardHeights = row.cards.reduce(CGFloat.zero) { height, card in
+            height + (
+                expandedCardID == card.id
+                    ? CardLayoutCalculator.height(for: card.renderData)
+                    : 60
+            )
+        }
         let cardSpacing = CGFloat(max(0, row.cards.count - 1)) * 8
         return cardHeights + cardSpacing + 20
     }
 
-    private func listModeRow(_ row: HolderListRow, showsTopSeparator: Bool) -> some View {
+    private func listModeRow(
+        _ row: HolderListRow,
+        showsTopSeparator: Bool,
+        scrollProxy: ScrollViewProxy
+    ) -> some View {
         Button {
+            let isCollapsing = expandedListID == row.id
+
             withAnimation(.snappy(duration: 0.28)) {
-                expandedListID = expandedListID == row.id ? nil : row.id
+                expandedCardID = nil
+                isContextMenuVisible = false
+                expandedListID = isCollapsing ? nil : row.id
+            }
+
+            if isCollapsing {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+                    withAnimation(.snappy(duration: 0.28)) {
+                        scrollProxy.scrollTo(row.id, anchor: .top)
+                    }
+                }
             }
         } label: {
             HStack(spacing: 0) {
@@ -412,31 +513,57 @@ struct CardHolderView: View {
         }
     }
 
-    private var groupedCards: [(title: String, cards: [BusinessCard])] {
+    private var groupedCards: [GroupedCardSection] {
         switch mode {
         case .list:
             return []
         case .name:
-            let sorted = cards.sorted { pinyinSortKey(for: $0.name) < pinyinSortKey(for: $1.name) }
-            return Dictionary(grouping: sorted) { card in
-                pinyinInitial(for: card.name)
+            let sorted = cards
+                .map { GroupedCardSortRecord(card: $0) }
+                .sorted { $0.nameSortKey < $1.nameSortKey }
+            return Dictionary(grouping: sorted) { record in
+                pinyinInitial(forSortKey: record.nameSortKey)
             }
-            .map { ($0.key.isEmpty ? "#" : $0.key, $0.value) }
+            .map { key, records in
+                GroupedCardSection(
+                    title: key.isEmpty ? "#" : key,
+                    cards: records.map(\.card)
+                )
+            }
             .sorted { $0.title < $1.title }
         case .organization:
-            let sorted = cards.sorted { lhs, rhs in
-                let leftOrg = pinyinSortKey(for: lhs.organizationName)
-                let rightOrg = pinyinSortKey(for: rhs.organizationName)
-                if leftOrg == rightOrg {
-                    return pinyinSortKey(for: lhs.name) < pinyinSortKey(for: rhs.name)
+            let sorted = cards
+                .map { GroupedCardSortRecord(card: $0) }
+                .sorted { lhs, rhs in
+                    if lhs.organizationSortKey == rhs.organizationSortKey {
+                        return lhs.nameSortKey < rhs.nameSortKey
+                    }
+                    return lhs.organizationSortKey < rhs.organizationSortKey
                 }
-                return leftOrg < rightOrg
+            return Dictionary(grouping: sorted) { record in
+                record.card.organizationName.isEmpty ? "未命名单位" : record.card.organizationName
             }
-            return Dictionary(grouping: sorted) { card in
-                card.organizationName.isEmpty ? "未命名单位" : card.organizationName
+            .map { title, records in
+                GroupedCardSection(
+                    title: title,
+                    cards: records.map(\.card),
+                    sortKey: records.first?.organizationSortKey ?? "#"
+                )
             }
-            .map { ($0.key, $0.value) }
-            .sorted { $0.title < $1.title }
+            .sorted { $0.sortKey < $1.sortKey }
+        }
+    }
+
+    private func groupedSectionID(for letter: String) -> String? {
+        switch mode {
+        case .list:
+            return nil
+        case .name:
+            return groupedCards.first { $0.title == letter }?.id
+        case .organization:
+            return groupedCards.first {
+                pinyinInitial(forSortKey: $0.sortKey) == letter
+            }?.id
         }
     }
 
@@ -518,27 +645,111 @@ private struct HolderListRow: Identifiable {
     let isUncategorized: Bool
 }
 
+private struct GroupedHeaderAnchor {
+    let title: String
+    let bounds: Anchor<CGRect>
+}
+
+private struct GroupedHeaderAnchorPreferenceKey: PreferenceKey {
+    static let defaultValue: [GroupedHeaderAnchor] = []
+
+    static func reduce(
+        value: inout [GroupedHeaderAnchor],
+        nextValue: () -> [GroupedHeaderAnchor]
+    ) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+private struct GroupedCardSection: Identifiable {
+    let title: String
+    let cards: [BusinessCard]
+    let sortKey: String
+
+    var id: String { title }
+
+    init(title: String, cards: [BusinessCard], sortKey: String? = nil) {
+        self.title = title
+        self.cards = cards
+        self.sortKey = sortKey ?? title
+    }
+}
+
+private struct GroupedCardSortRecord {
+    let card: BusinessCard
+    let nameSortKey: String
+    let organizationSortKey: String
+
+    init(card: BusinessCard) {
+        self.card = card
+        self.nameSortKey = pinyinSortKey(for: card.name)
+        self.organizationSortKey = pinyinSortKey(for: card.organizationName)
+    }
+}
+
+private struct AlphabetIndexRequest: Equatable {
+    let id = UUID()
+    let letter: String
+}
+
 private struct ContactAlphabetIndex: View {
+    let onSelect: (String) -> Void
+
     private let letters = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ#").map(String.init)
+    private let letterHeight: CGFloat = 13
+    private let letterSpacing: CGFloat = 1
+    private let indexHeight: CGFloat = 770
+
+    @State private var lastDraggedLetter: String?
 
     var body: some View {
         VStack(spacing: 1) {
             ForEach(letters, id: \.self) { letter in
-                Text(letter)
-                    .font(CardaTheme.sfPro(size: 11, weight: .semibold))
-                    .tracking(0.06)
-                    .foregroundStyle(Color.black)
-                    .frame(width: 10, height: 13)
+                Button {
+                    onSelect(letter)
+                } label: {
+                    Text(letter)
+                        .font(CardaTheme.sfPro(size: 11, weight: .semibold))
+                        .tracking(0.06)
+                        .foregroundStyle(Color.black)
+                        .frame(width: 22, height: letterHeight)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("跳转到 \(letter)")
             }
         }
-        .frame(width: 12, height: 770, alignment: .center)
-        .allowsHitTesting(false)
+        .frame(width: 22, height: indexHeight, alignment: .center)
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                .onChanged { value in
+                    guard let letter = letter(at: value.location.y) else { return }
+                    guard letter != lastDraggedLetter else { return }
+                    lastDraggedLetter = letter
+                    onSelect(letter)
+                }
+                .onEnded { _ in
+                    lastDraggedLetter = nil
+                }
+        )
+    }
+
+    private func letter(at y: CGFloat) -> String? {
+        let contentHeight =
+            CGFloat(letters.count) * letterHeight
+            + CGFloat(letters.count - 1) * letterSpacing
+        let contentTop = (indexHeight - contentHeight) / 2
+        let relativeY = y - contentTop
+        guard relativeY >= 0, relativeY < contentHeight else { return nil }
+
+        let rowHeight = letterHeight + letterSpacing
+        let index = min(Int(relativeY / rowHeight), letters.count - 1)
+        return letters[index]
     }
 }
 
-private func pinyinInitial(for text: String) -> String {
-    guard let first = text.trimmingCharacters(in: .whitespacesAndNewlines).first else { return "#" }
-    let key = pinyinSortKey(for: String(first))
+private func pinyinInitial(forSortKey key: String) -> String {
     guard let scalar = key.unicodeScalars.first, CharacterSet.letters.contains(scalar) else { return "#" }
     return String(Character(scalar)).uppercased()
 }

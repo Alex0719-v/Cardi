@@ -42,7 +42,7 @@ struct BottomNavigationBar: View {
     private var normalControls: some View {
         ZStack(alignment: .topLeading) {
             FigmaGlassShape(cornerRadius: 296)
-                .frame(width: 192, height: 62)
+                .frame(width: 191, height: 62)
                 .offset(x: 21, y: 12)
                 .allowsHitTesting(false)
 
@@ -105,7 +105,7 @@ struct BottomNavigationBar: View {
 
     private var searchActiveControls: some View {
         ZStack(alignment: .topLeading) {
-            if !isSearchEditing {
+            if !isSearchEditing && !hasSearchText {
                 Button {
                     isSearchActive = false
                 } label: {
@@ -122,7 +122,7 @@ struct BottomNavigationBar: View {
                     .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .offset(x: 21.5, y: 12)
+                .offset(x: 20.5, y: 12)
             }
 
             HStack(spacing: 10) {
@@ -133,6 +133,11 @@ struct BottomNavigationBar: View {
                     .focused($searchFieldFocused)
                     .font(CardaTheme.pingFang(size: 17))
                     .disableAutocorrection(true)
+                    .submitLabel(.done)
+                    .onSubmit {
+                        searchFieldFocused = false
+                        isSearchEditing = false
+                    }
                     .allowsHitTesting(isSearchEditing)
                     .onTapGesture {
                         activateSearchField()
@@ -144,11 +149,11 @@ struct BottomNavigationBar: View {
                     }
             }
             .padding(.horizontal, 18)
-            .frame(width: isSearchEditing ? 293 : 279, height: 62)
+            .frame(width: usesWideSearchLayout ? 293 : 279, height: 62)
             .background(FigmaGlassShape(cornerRadius: 296, interactive: true))
             .contentShape(RoundedRectangle(cornerRadius: 296, style: .continuous))
             .overlay {
-                if !isSearchEditing {
+                if !isSearchEditing && !hasSearchText {
                     RoundedRectangle(cornerRadius: 296, style: .continuous)
                         .fill(Color.white.opacity(0.001))
                         .contentShape(RoundedRectangle(cornerRadius: 296, style: .continuous))
@@ -158,16 +163,15 @@ struct BottomNavigationBar: View {
                 }
             }
             .onTapGesture {
-                if isSearchEditing {
+                if !isSearchEditing {
                     activateSearchField()
                 }
             }
-            .offset(x: isSearchEditing ? 16 : 103, y: 12)
+            .offset(x: usesWideSearchLayout ? 16 : 103, y: 12)
 
-            if isSearchEditing {
+            if isSearchEditing || hasSearchText {
                 Button {
-                    searchFieldFocused = false
-                    isSearchEditing = false
+                    clearSearch()
                 } label: {
                     XMarkGlyph()
                         .stroke(CardaTheme.primaryText, style: StrokeStyle(lineWidth: 2.4, lineCap: .round))
@@ -178,9 +182,18 @@ struct BottomNavigationBar: View {
                 .buttonStyle(.plain)
                 .background(FigmaGlassShape(cornerRadius: 296, interactive: true))
                 .offset(x: 325, y: 12)
+                .accessibilityLabel("清空搜索")
             }
         }
         .frame(width: CardaTheme.canvasWidth, height: 95, alignment: .topLeading)
+    }
+
+    private var hasSearchText: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var usesWideSearchLayout: Bool {
+        isSearchEditing || hasSearchText
     }
 
     private func activateSearchField() {
@@ -188,6 +201,12 @@ struct BottomNavigationBar: View {
         DispatchQueue.main.async {
             searchFieldFocused = true
         }
+    }
+
+    private func clearSearch() {
+        searchText = ""
+        searchFieldFocused = false
+        isSearchEditing = false
     }
 }
 

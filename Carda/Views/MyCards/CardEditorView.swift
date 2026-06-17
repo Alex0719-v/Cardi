@@ -508,6 +508,7 @@ private struct FigmaEditorTextField: View {
     let placeholderColor: Color
     let lineLimit: ClosedRange<Int>
     var tracking: CGFloat = 0
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -533,21 +534,31 @@ private struct FigmaEditorTextField: View {
     private var textInput: some View {
         if isSingleLine {
             TextField("", text: $text)
+                .focused($isFocused)
                 .font(font)
                 .foregroundStyle(color)
                 .tracking(tracking)
                 .textFieldStyle(.plain)
                 .lineLimit(1)
                 .disableAutocorrection(true)
+                .submitLabel(.done)
+                .onSubmit(dismissKeyboard)
         } else {
             TextField("", text: $text, axis: .vertical)
+                .focused($isFocused)
                 .font(font)
                 .foregroundStyle(color)
                 .tracking(tracking)
                 .textFieldStyle(.plain)
                 .lineLimit(lineLimit)
                 .disableAutocorrection(true)
+                .submitLabel(.done)
+                .onSubmit(dismissKeyboard)
         }
+    }
+
+    private func dismissKeyboard() {
+        isFocused = false
     }
 }
 

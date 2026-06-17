@@ -13,6 +13,7 @@ struct ContentView: View {
         FigmaPhoneCanvas {
             AppShellView()
         }
+        .preferredColorScheme(.light)
     }
 }
 
