@@ -70,7 +70,7 @@ struct MyCardsView: View {
 
                     if myCards.count > 1 {
                         PageIndicatorCapsule(count: myCards.count, selectedIndex: selectedIndex)
-                            .position(x: proxy.size.width / 2, y: 726)
+                            .position(x: proxy.size.width / 2, y: 760)
                     }
                 }
 

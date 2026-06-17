@@ -101,20 +101,120 @@ struct BusinessCardView: View {
             avatar
             identityGroup
             infoGroup
+            actionButtonColumn
         }
         .frame(width: width, height: height)
-        .clipShape(RoundedRectangle(cornerRadius: 24 * scale, style: .continuous))
-        .shadow(color: .black.opacity(0.25), radius: 2 * scale, x: 0, y: 0)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(data.displayName)
     }
 
     private var cardBackground: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 24 * scale, style: .continuous)
-                .fill(Color.white)
+        let shape = BusinessCardBodyShape(
+            cutoutTop: cardBodyCutoutTop * scale,
+            cutoutWidth: cardBodyCutoutWidth * scale,
+            cornerRadius: cardBodyCornerRadius * scale,
+            usesCompactSingleButtonCutout: actionButtonFields.count == 1
+        )
 
-            CardPhotoBackground(width: width, height: height)
+        return shape
+            .fill(Color.white, style: FillStyle(eoFill: true))
+            .shadow(color: .black.opacity(0.25), radius: 2 * scale, x: 0, y: 0)
+            .overlay {
+                CardPhotoBackground(width: width, height: height)
+                    .mask {
+                        shape.fill(style: FillStyle(eoFill: true))
+                    }
+            }
+    }
+
+    private var cardBodyCutoutWidth: CGFloat {
+        actionButtonFields.isEmpty ? 0 : 41
+    }
+
+    private var cardBodyCornerRadius: CGFloat {
+        CardaTheme.cardCornerRadius + 2
+    }
+
+    private var cardBodyCutoutTop: CGFloat {
+        guard !actionButtonFields.isEmpty else { return unscaledHeight }
+        return max(0, actionButtonColumnTop - 7)
+    }
+
+    private struct BusinessCardBodyShape: Shape {
+        let cutoutTop: CGFloat
+        let cutoutWidth: CGFloat
+        let cornerRadius: CGFloat
+        let usesCompactSingleButtonCutout: Bool
+
+        func path(in rect: CGRect) -> Path {
+            guard cutoutWidth > 0, cutoutTop < rect.height else {
+                return Path(
+                    roundedRect: rect,
+                    cornerRadius: cornerRadius,
+                    style: .continuous
+                )
+            }
+
+            let outerRadius = min(
+                cornerRadius,
+                rect.width / 2,
+                rect.height / 2
+            )
+            let preferredSlotRadius = min(cornerRadius, cutoutWidth / 2)
+            let minCutoutHeight = preferredSlotRadius + outerRadius
+            let requestedCutoutY = min(max(0, cutoutTop), rect.height)
+            let cutoutY = usesCompactSingleButtonCutout
+                ? requestedCutoutY
+                : min(requestedCutoutY, max(0, rect.height - minCutoutHeight))
+            let cutoutHeight = rect.height - cutoutY
+            let cutoutX = rect.maxX - cutoutWidth
+            let slotRadius = min(
+                preferredSlotRadius,
+                cutoutHeight / 2,
+                max(cutoutY - outerRadius, 0)
+            )
+            let bottomSlotRadius = min(
+                outerRadius,
+                cutoutHeight - slotRadius,
+                rect.width / 2,
+                rect.height / 2
+            )
+
+            var path = Path()
+            path.move(to: CGPoint(x: rect.minX + outerRadius, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.maxX - outerRadius, y: rect.minY))
+            path.addQuadCurve(
+                to: CGPoint(x: rect.maxX, y: rect.minY + outerRadius),
+                control: CGPoint(x: rect.maxX, y: rect.minY)
+            )
+            path.addLine(to: CGPoint(x: rect.maxX, y: cutoutY - slotRadius))
+            path.addQuadCurve(
+                to: CGPoint(x: rect.maxX - slotRadius, y: cutoutY),
+                control: CGPoint(x: rect.maxX, y: cutoutY)
+            )
+            path.addLine(to: CGPoint(x: cutoutX + slotRadius, y: cutoutY))
+            path.addQuadCurve(
+                to: CGPoint(x: cutoutX, y: cutoutY + slotRadius),
+                control: CGPoint(x: cutoutX, y: cutoutY)
+            )
+            path.addLine(to: CGPoint(x: cutoutX, y: rect.maxY - bottomSlotRadius))
+            path.addQuadCurve(
+                to: CGPoint(x: cutoutX - bottomSlotRadius, y: rect.maxY),
+                control: CGPoint(x: cutoutX, y: rect.maxY)
+            )
+            path.addLine(to: CGPoint(x: rect.minX + outerRadius, y: rect.maxY))
+            path.addQuadCurve(
+                to: CGPoint(x: rect.minX, y: rect.maxY - outerRadius),
+                control: CGPoint(x: rect.minX, y: rect.maxY)
+            )
+            path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + outerRadius))
+            path.addQuadCurve(
+                to: CGPoint(x: rect.minX + outerRadius, y: rect.minY),
+                control: CGPoint(x: rect.minX, y: rect.minY)
+            )
+            path.closeSubpath()
+
+            return path
         }
     }
 
@@ -194,7 +294,7 @@ struct BusinessCardView: View {
             DataImageView(data: data.avatarImageData)
                 .frame(width: 60 * scale, height: 60 * scale)
                 .clipShape(Circle())
-                .offset(x: 291 * scale, y: 19 * scale)
+                .offset(x: 291 * scale, y: 23 * scale)
         }
     }
 
@@ -222,41 +322,74 @@ struct BusinessCardView: View {
                 .offset(y: 49 * scale)
         }
         .frame(width: 132 * scale, height: 74 * scale, alignment: .leading)
-        .offset(x: 23 * scale, y: (((unscaledHeight - 68) / 2) - 16) * scale)
+        .offset(x: 23 * scale, y: identityGroupTop * scale)
     }
 
+    private var identityGroupTop: CGFloat {
+        ((unscaledHeight - 68) / 2) - 16
+    }
+
+    @ViewBuilder
     private var infoGroup: some View {
         let fields = data.visibleInfoFields
-        let infoDepth = max(
-            25,
-            fields.reduce(CGFloat.zero) { partial, field in
-                partial + 25 + CGFloat(CardLayoutCalculator.extraInfoLineCount(for: field)) * 20
-            }
-        )
-        return VStack(alignment: .leading, spacing: 5 * scale) {
-            ForEach(fields, id: \.id) { field in
-                let lineCount = CardLayoutCalculator.infoLineCount(for: field)
-                HStack(alignment: .top, spacing: 0) {
+        if !fields.isEmpty {
+            VStack(alignment: .trailing, spacing: 6 * scale) {
+                ForEach(fields, id: \.id) { field in
+                    let lineCount = CardLayoutCalculator.infoLineCount(for: field)
                     Text(field.value)
                         .font(infoFont(for: field.kind, size: 14 * scale))
                         .foregroundStyle(CardaTheme.secondaryText)
+                        .multilineTextAlignment(.trailing)
                         .lineLimit(nil)
                         .frame(
                             width: 185 * scale,
                             height: CGFloat(lineCount) * 20 * scale,
-                            alignment: .leading
+                            alignment: .trailing
                         )
-                    Spacer(minLength: 0)
-                    CardFieldIconView(kind: field.kind, scale: scale)
-                        .frame(width: 20 * scale, height: 20 * scale)
-                        .padding(.top, 0)
                 }
-                .frame(width: 223 * scale, alignment: .top)
-                .frame(minHeight: CGFloat(lineCount) * 20 * scale, alignment: .top)
+            }
+            .frame(width: 185 * scale, alignment: .trailing)
+            .offset(x: 122 * scale, y: infoGroupTop * scale)
+        }
+    }
+
+    private var infoGroupTop: CGFloat {
+        max(0, unscaledHeight - 20 - infoGroupDepth)
+    }
+
+    private var infoGroupDepth: CGFloat {
+        let fields = data.visibleInfoFields
+        guard !fields.isEmpty else { return 0 }
+
+        let textHeight = fields.reduce(CGFloat.zero) { partial, field in
+            partial + CGFloat(CardLayoutCalculator.infoLineCount(for: field)) * 20
+        }
+        let spacing = CGFloat(max(0, fields.count - 1)) * 6
+        return textHeight + spacing
+    }
+
+    private var actionButtonColumn: some View {
+        VStack(spacing: 5 * scale) {
+            ForEach(actionButtonFields, id: \.id) { field in
+                CardActionButton(kind: field.kind, scale: scale)
             }
         }
-        .frame(width: 223 * scale, alignment: .leading)
-        .offset(x: 127 * scale, y: (unscaledHeight - 20 - infoDepth + 6) * scale)
+        .frame(width: 34 * scale, height: actionButtonColumnHeight * scale, alignment: .top)
+        .offset(x: 336 * scale, y: actionButtonColumnTop * scale)
+    }
+
+    private var actionButtonFields: [CardFieldDraft] {
+        data.visibleInfoFields
+    }
+
+    private var actionButtonColumnHeight: CGFloat {
+        let count = actionButtonFields.count
+        guard count > 0 else { return 0 }
+        return CGFloat(count) * 34 + CGFloat(count - 1) * 5
+    }
+
+    private var actionButtonColumnTop: CGFloat {
+        max(0, unscaledHeight - actionButtonColumnHeight)
     }
 
     private func cardText(_ value: String, size: CGFloat, weight: Font.Weight) -> some View {
@@ -274,6 +407,22 @@ struct BusinessCardView: View {
         case .phone, .email, .link, .companyLogo:
             CardaTheme.sfPro(size: size, weight: .regular)
         }
+    }
+}
+
+private struct CardActionButton: View {
+    let kind: CardFieldKind
+    let scale: CGFloat
+
+    var body: some View {
+        Circle()
+            .fill(Color.white)
+            .frame(width: 34 * scale, height: 34 * scale)
+            .shadow(color: .black.opacity(0.25), radius: 2 * scale, x: 0, y: 0)
+            .overlay {
+                CardFieldIconView(kind: kind, scale: scale)
+                    .frame(width: 20 * scale, height: 20 * scale)
+            }
     }
 }
 

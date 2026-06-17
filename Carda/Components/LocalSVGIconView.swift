@@ -75,7 +75,7 @@ private struct ParsedSVGIcon {
         self.elements = Self.parseElements(source)
     }
 
-    private static func parseViewBox(_ source: String) -> CGRect? {
+    nonisolated private static func parseViewBox(_ source: String) -> CGRect? {
         guard let value = attribute("viewBox", in: source) else { return nil }
         let values = value
             .split { $0 == " " || $0 == "," }
@@ -84,13 +84,13 @@ private struct ParsedSVGIcon {
         return CGRect(x: values[0], y: values[1], width: values[2], height: values[3])
     }
 
-    private static func parseElements(_ source: String) -> [SVGElement] {
+    nonisolated private static func parseElements(_ source: String) -> [SVGElement] {
         let pathElements = tags(named: "path", in: source).compactMap(SVGElement.path)
         let rectElements = tags(named: "rect", in: source).compactMap(SVGElement.rect)
         return pathElements + rectElements
     }
 
-    fileprivate static func tags(named name: String, in source: String) -> [String] {
+    nonisolated fileprivate static func tags(named name: String, in source: String) -> [String] {
         let pattern = "<\(name)\\b[^>]*>"
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let range = NSRange(source.startIndex..<source.endIndex, in: source)
@@ -100,7 +100,7 @@ private struct ParsedSVGIcon {
         }
     }
 
-    fileprivate static func attribute(_ name: String, in text: String) -> String? {
+    nonisolated fileprivate static func attribute(_ name: String, in text: String) -> String? {
         let pattern = "\\b\(name)=\"([^\"]*)\""
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
@@ -123,7 +123,7 @@ private struct SVGElement {
     let lineCap: CGLineCap
     let lineJoin: CGLineJoin
 
-    static func path(from tag: String) -> SVGElement? {
+    nonisolated static func path(from tag: String) -> SVGElement? {
         guard let d = ParsedSVGIcon.attribute("d", in: tag) else { return nil }
         var parser = SVGPathParser(d)
         guard let path = parser.parse() else { return nil }
@@ -138,7 +138,7 @@ private struct SVGElement {
         )
     }
 
-    static func rect(from tag: String) -> SVGElement? {
+    nonisolated static func rect(from tag: String) -> SVGElement? {
         guard
             let x = Double(ParsedSVGIcon.attribute("x", in: tag) ?? "0"),
             let y = Double(ParsedSVGIcon.attribute("y", in: tag) ?? "0"),
@@ -170,7 +170,7 @@ private struct SVGElement {
         )
     }
 
-    private static func paintColor(named name: String?, opacity: Double) -> Color? {
+    nonisolated private static func paintColor(named name: String?, opacity: Double) -> Color? {
         guard let name, name != "none" else { return nil }
         switch name {
         case "black":
@@ -182,15 +182,15 @@ private struct SVGElement {
         }
     }
 
-    private static func fillOpacity(in tag: String) -> Double {
+    nonisolated private static func fillOpacity(in tag: String) -> Double {
         Double(ParsedSVGIcon.attribute("fill-opacity", in: tag) ?? "1") ?? 1
     }
 
-    private static func strokeOpacity(in tag: String) -> Double {
+    nonisolated private static func strokeOpacity(in tag: String) -> Double {
         Double(ParsedSVGIcon.attribute("stroke-opacity", in: tag) ?? "1") ?? 1
     }
 
-    private static func lineCap(named name: String?) -> CGLineCap {
+    nonisolated private static func lineCap(named name: String?) -> CGLineCap {
         switch name {
         case "round":
             .round
@@ -201,7 +201,7 @@ private struct SVGElement {
         }
     }
 
-    private static func lineJoin(named name: String?) -> CGLineJoin {
+    nonisolated private static func lineJoin(named name: String?) -> CGLineJoin {
         switch name {
         case "round":
             .round
@@ -212,7 +212,7 @@ private struct SVGElement {
         }
     }
 
-    private static func rotationTransform(in tag: String) -> CGAffineTransform? {
+    nonisolated private static func rotationTransform(in tag: String) -> CGAffineTransform? {
         guard let transform = ParsedSVGIcon.attribute("transform", in: tag) else { return nil }
         let pattern = #"rotate\(([-+0-9.eE]+)\s+([-+0-9.eE]+)\s+([-+0-9.eE]+)\)"#
         guard
