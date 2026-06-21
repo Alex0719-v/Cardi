@@ -81,6 +81,7 @@ enum CardLayoutCalculator {
 struct BusinessCardView: View {
     let data: CardRenderData
     var width: CGFloat = CardaTheme.cardWidth
+    var showsCardShadow = true
 
     private var scale: CGFloat {
         width / CardaTheme.cardWidth
@@ -118,7 +119,12 @@ struct BusinessCardView: View {
 
         return shape
             .fill(Color.white, style: FillStyle(eoFill: true))
-            .shadow(color: .black.opacity(0.25), radius: 2 * scale, x: 0, y: 0)
+            .shadow(
+                color: .black.opacity(showsCardShadow ? 0.25 : 0),
+                radius: showsCardShadow ? 2 * scale : 0,
+                x: 0,
+                y: 0
+            )
             .overlay {
                 CardPhotoBackground(width: width, height: height)
                     .mask {
@@ -151,7 +157,7 @@ struct BusinessCardView: View {
                 return Path(
                     roundedRect: rect,
                     cornerRadius: cornerRadius,
-                    style: .continuous
+                    style: .circular
                 )
             }
 
@@ -183,34 +189,40 @@ struct BusinessCardView: View {
             var path = Path()
             path.move(to: CGPoint(x: rect.minX + outerRadius, y: rect.minY))
             path.addLine(to: CGPoint(x: rect.maxX - outerRadius, y: rect.minY))
-            path.addQuadCurve(
+            path.addCircularCorner(
+                via: CGPoint(x: rect.maxX, y: rect.minY),
                 to: CGPoint(x: rect.maxX, y: rect.minY + outerRadius),
-                control: CGPoint(x: rect.maxX, y: rect.minY)
+                radius: outerRadius
             )
             path.addLine(to: CGPoint(x: rect.maxX, y: cutoutY - slotRadius))
-            path.addQuadCurve(
+            path.addCircularCorner(
+                via: CGPoint(x: rect.maxX, y: cutoutY),
                 to: CGPoint(x: rect.maxX - slotRadius, y: cutoutY),
-                control: CGPoint(x: rect.maxX, y: cutoutY)
+                radius: slotRadius
             )
             path.addLine(to: CGPoint(x: cutoutX + slotRadius, y: cutoutY))
-            path.addQuadCurve(
+            path.addCircularCorner(
+                via: CGPoint(x: cutoutX, y: cutoutY),
                 to: CGPoint(x: cutoutX, y: cutoutY + slotRadius),
-                control: CGPoint(x: cutoutX, y: cutoutY)
+                radius: slotRadius
             )
             path.addLine(to: CGPoint(x: cutoutX, y: rect.maxY - bottomSlotRadius))
-            path.addQuadCurve(
+            path.addCircularCorner(
+                via: CGPoint(x: cutoutX, y: rect.maxY),
                 to: CGPoint(x: cutoutX - bottomSlotRadius, y: rect.maxY),
-                control: CGPoint(x: cutoutX, y: rect.maxY)
+                radius: bottomSlotRadius
             )
             path.addLine(to: CGPoint(x: rect.minX + outerRadius, y: rect.maxY))
-            path.addQuadCurve(
+            path.addCircularCorner(
+                via: CGPoint(x: rect.minX, y: rect.maxY),
                 to: CGPoint(x: rect.minX, y: rect.maxY - outerRadius),
-                control: CGPoint(x: rect.minX, y: rect.maxY)
+                radius: outerRadius
             )
             path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + outerRadius))
-            path.addQuadCurve(
+            path.addCircularCorner(
+                via: CGPoint(x: rect.minX, y: rect.minY),
                 to: CGPoint(x: rect.minX + outerRadius, y: rect.minY),
-                control: CGPoint(x: rect.minX, y: rect.minY)
+                radius: outerRadius
             )
             path.closeSubpath()
 
@@ -410,6 +422,18 @@ struct BusinessCardView: View {
     }
 }
 
+private extension Path {
+    mutating func addCircularCorner(via corner: CGPoint, to end: CGPoint, radius: CGFloat) {
+        guard radius > 0 else {
+            addLine(to: corner)
+            addLine(to: end)
+            return
+        }
+
+        addArc(tangent1End: corner, tangent2End: end, radius: radius)
+    }
+}
+
 private struct CardActionButton: View {
     let kind: CardFieldKind
     let scale: CGFloat
@@ -418,7 +442,6 @@ private struct CardActionButton: View {
         Circle()
             .fill(Color.white)
             .frame(width: 34 * scale, height: 34 * scale)
-            .shadow(color: .black.opacity(0.25), radius: 2 * scale, x: 0, y: 0)
             .overlay {
                 CardFieldIconView(kind: kind, scale: scale)
                     .frame(width: 20 * scale, height: 20 * scale)
@@ -435,9 +458,6 @@ private struct CardFieldIconView: View {
         if let svgIcon = CardInfoSVGIcon(kind: kind) {
             LocalSVGIconView(fileName: svgIcon.fileName)
                 .frame(width: 20 * scale, height: 20 * scale)
-        } else if kind == .link {
-            LinkIconShape()
-                .stroke(CardaTheme.secondaryText, style: iconStroke)
         } else {
             CompanyLogoIconShape()
                 .stroke(CardaTheme.secondaryText, style: iconStroke)
@@ -453,6 +473,7 @@ private enum CardInfoSVGIcon {
     case phone
     case mapPin
     case mail
+    case link
 
     init?(kind: CardFieldKind) {
         switch kind {
@@ -462,7 +483,9 @@ private enum CardInfoSVGIcon {
             self = .mapPin
         case .email:
             self = .mail
-        case .link, .companyLogo:
+        case .link:
+            self = .link
+        case .companyLogo:
             return nil
         }
     }
@@ -475,24 +498,9 @@ private enum CardInfoSVGIcon {
             "Map pin"
         case .mail:
             "Mail"
+        case .link:
+            "Link"
         }
-    }
-}
-
-private struct LinkIconShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.width * 0.42, y: rect.height * 0.35))
-        path.addCurve(to: CGPoint(x: rect.width * 0.62, y: rect.height * 0.28), control1: CGPoint(x: rect.width * 0.48, y: rect.height * 0.25), control2: CGPoint(x: rect.width * 0.55, y: rect.height * 0.23))
-        path.addCurve(to: CGPoint(x: rect.width * 0.80, y: rect.height * 0.48), control1: CGPoint(x: rect.width * 0.75, y: rect.height * 0.36), control2: CGPoint(x: rect.width * 0.84, y: rect.height * 0.38))
-        path.addCurve(to: CGPoint(x: rect.width * 0.64, y: rect.height * 0.67), control1: CGPoint(x: rect.width * 0.75, y: rect.height * 0.58), control2: CGPoint(x: rect.width * 0.71, y: rect.height * 0.66))
-        path.move(to: CGPoint(x: rect.width * 0.58, y: rect.height * 0.65))
-        path.addCurve(to: CGPoint(x: rect.width * 0.38, y: rect.height * 0.72), control1: CGPoint(x: rect.width * 0.52, y: rect.height * 0.75), control2: CGPoint(x: rect.width * 0.45, y: rect.height * 0.77))
-        path.addCurve(to: CGPoint(x: rect.width * 0.20, y: rect.height * 0.52), control1: CGPoint(x: rect.width * 0.25, y: rect.height * 0.64), control2: CGPoint(x: rect.width * 0.16, y: rect.height * 0.62))
-        path.addCurve(to: CGPoint(x: rect.width * 0.36, y: rect.height * 0.33), control1: CGPoint(x: rect.width * 0.25, y: rect.height * 0.42), control2: CGPoint(x: rect.width * 0.29, y: rect.height * 0.34))
-        path.move(to: CGPoint(x: rect.width * 0.38, y: rect.height * 0.58))
-        path.addLine(to: CGPoint(x: rect.width * 0.62, y: rect.height * 0.42))
-        return path
     }
 }
 

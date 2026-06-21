@@ -85,9 +85,17 @@ private struct ParsedSVGIcon {
     }
 
     nonisolated private static func parseElements(_ source: String) -> [SVGElement] {
-        let pathElements = tags(named: "path", in: source).compactMap(SVGElement.path)
-        let rectElements = tags(named: "rect", in: source).compactMap(SVGElement.rect)
+        let drawableSource = drawableSource(from: source)
+        let pathElements = tags(named: "path", in: drawableSource).compactMap(SVGElement.path)
+        let rectElements = tags(named: "rect", in: drawableSource).compactMap(SVGElement.rect)
         return pathElements + rectElements
+    }
+
+    nonisolated private static func drawableSource(from source: String) -> String {
+        let pattern = "<defs\\b[\\s\\S]*?</defs>"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return source }
+        let range = NSRange(source.startIndex..<source.endIndex, in: source)
+        return regex.stringByReplacingMatches(in: source, range: range, withTemplate: "")
     }
 
     nonisolated fileprivate static func tags(named name: String, in source: String) -> [String] {
@@ -177,6 +185,8 @@ private struct SVGElement {
             return Color.black.opacity(opacity)
         case "#141414":
             return Color(red: 20 / 255, green: 20 / 255, blue: 20 / 255).opacity(opacity)
+        case "#1E1E1E":
+            return Color(red: 30 / 255, green: 30 / 255, blue: 30 / 255).opacity(opacity)
         default:
             return Color.black.opacity(opacity)
         }
@@ -241,11 +251,11 @@ private struct SVGPathParser {
     private var currentPoint = CGPoint.zero
     private var subpathStart = CGPoint.zero
 
-    init(_ d: String) {
+    nonisolated init(_ d: String) {
         self.tokens = Self.tokenize(d)
     }
 
-    mutating func parse() -> Path? {
+    nonisolated mutating func parse() -> Path? {
         var path = Path()
         var command: Character?
 
@@ -311,7 +321,7 @@ private struct SVGPathParser {
         return path
     }
 
-    private var hasNumber: Bool {
+    nonisolated private var hasNumber: Bool {
         guard index < tokens.count else { return false }
         if case .number = tokens[index] {
             return true
@@ -319,7 +329,7 @@ private struct SVGPathParser {
         return false
     }
 
-    private mutating func readPoint(relative: Bool) -> CGPoint? {
+    nonisolated private mutating func readPoint(relative: Bool) -> CGPoint? {
         guard let x = readNumber(), let y = readNumber() else { return nil }
         if relative {
             return CGPoint(x: currentPoint.x + x, y: currentPoint.y + y)
@@ -327,14 +337,14 @@ private struct SVGPathParser {
         return CGPoint(x: x, y: y)
     }
 
-    private mutating func readNumber() -> CGFloat? {
+    nonisolated private mutating func readNumber() -> CGFloat? {
         guard index < tokens.count else { return nil }
         guard case let .number(value) = tokens[index] else { return nil }
         index += 1
         return CGFloat(value)
     }
 
-    private static func tokenize(_ d: String) -> [Token] {
+    nonisolated private static func tokenize(_ d: String) -> [Token] {
         var tokens: [Token] = []
         var i = d.startIndex
 
@@ -361,7 +371,7 @@ private struct SVGPathParser {
         return tokens
     }
 
-    private static func isNumberCharacter(_ character: Character, previous: Character) -> Bool {
+    nonisolated private static func isNumberCharacter(_ character: Character, previous: Character) -> Bool {
         if character.isNumber || character == "." {
             return true
         }

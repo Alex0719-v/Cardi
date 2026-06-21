@@ -14,6 +14,7 @@ enum CardaTheme {
     static let cardCornerRadius: CGFloat = 24
 
     static let pageBackground = Color(red: 249 / 255, green: 248 / 255, blue: 251 / 255)
+    static let myCardsBackground = Color(red: 225 / 255, green: 224 / 255, blue: 227 / 255)
     static let editorBackground = pageBackground
     static let mainAccent = Color(red: 0.996, green: 0.475, blue: 0.235)
     static let selectedTabFill = Color(red: 0.929, green: 0.929, blue: 0.929)

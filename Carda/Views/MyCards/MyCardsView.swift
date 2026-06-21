@@ -40,6 +40,7 @@ struct MyCardsView: View {
     @State private var isAddSheetPresented = false
     @State private var isContextMenuVisible = false
     @State private var saveMessage: String?
+    @StateObject private var exchangeCoordinator = CardExchangeCoordinator()
 
     private var myCards: [BusinessCard] {
         allCards
@@ -55,6 +56,9 @@ struct MyCardsView: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .topLeading) {
+                CardaTheme.myCardsBackground
+                    .frame(width: CardaTheme.canvasWidth, height: CardaTheme.canvasHeight)
+
                 ScreenHeader(
                     title: "我的名片",
                     avatarImageData: accountAvatarImageData,
@@ -112,8 +116,8 @@ struct MyCardsView: View {
                     }
                 }
 
-                if let saveMessage {
-                    Text(saveMessage)
+                if let feedbackMessage {
+                    Text(feedbackMessage)
                         .font(CardaTheme.pingFang(size: 14, weight: .medium))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 14)
@@ -139,7 +143,39 @@ struct MyCardsView: View {
         }
         .onChange(of: myCards.count) { _, count in
             selectedIndex = min(selectedIndex, max(0, count - 1))
+            refreshExchangeSession()
         }
+        .onChange(of: currentCard?.id) { _, _ in
+            refreshExchangeSession()
+        }
+        .onChange(of: currentCard?.updatedAt) { _, _ in
+            refreshExchangeSession()
+        }
+        .onChange(of: isAddSheetPresented) { _, _ in
+            refreshExchangeSession()
+        }
+        .onChange(of: editorMode?.id) { _, _ in
+            refreshExchangeSession()
+        }
+        .onChange(of: exchangeCoordinator.statusMessage) { _, message in
+            guard let message else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                if exchangeCoordinator.statusMessage == message {
+                    exchangeCoordinator.statusMessage = nil
+                }
+            }
+        }
+        .onAppear {
+            exchangeCoordinator.onReceivedCard = insertReceivedCard
+            refreshExchangeSession()
+        }
+        .onDisappear {
+            exchangeCoordinator.stop()
+        }
+    }
+
+    private var feedbackMessage: String? {
+        saveMessage ?? exchangeCoordinator.statusMessage
     }
 
     private var emptyState: some View {
@@ -147,7 +183,7 @@ struct MyCardsView: View {
             editorMode = .create
         } label: {
             ZStack {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                RoundedRectangle(cornerRadius: 24, style: .circular)
                     .fill(CardaTheme.formFill)
                     .frame(width: 370, height: 223)
 
@@ -213,6 +249,30 @@ struct MyCardsView: View {
         }
     }
 
+    private func refreshExchangeSession() {
+        guard
+            let currentCard,
+            editorMode == nil,
+            !isAddSheetPresented
+        else {
+            exchangeCoordinator.stop()
+            return
+        }
+
+        exchangeCoordinator.start(with: currentCard.renderData)
+        exchangeCoordinator.updateLocalCard(currentCard.renderData)
+    }
+
+    private func insertReceivedCard(_ payload: CardExchangePayload) {
+        modelContext.insert(payload.receivedBusinessCard())
+
+        do {
+            try modelContext.save()
+        } catch {
+            exchangeCoordinator.statusMessage = "交换名片保存失败"
+        }
+    }
+
     private func saveCurrentCard(_ card: BusinessCard) {
         let ok = CardImageExporter.savePNG(for: card.renderData)
         withAnimation {
@@ -258,7 +318,7 @@ private struct MyCardCarousel: View {
         ZStack {
             ForEach(visibleSlots, id: \.self) { slot in
                 if let card = card(for: slot) {
-                    BusinessCardView(data: card.renderData, width: width)
+                    BusinessCardView(data: card.renderData, width: width, showsCardShadow: false)
                         .id("\(card.id.uuidString)-\(slot)")
                         .offset(x: CGFloat(slot) * pageStride + dragOffset)
                 }

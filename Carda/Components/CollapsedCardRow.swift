@@ -41,9 +41,8 @@ struct CollapsedCardRow: View {
     }
 
     private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 30)
+        RoundedRectangle(cornerRadius: 30, style: .circular)
             .fill(Color.white)
-            .shadow(color: .black.opacity(0.25), radius: 2, x: 0, y: 0)
     }
 
     private var displayNameFont: Font {
