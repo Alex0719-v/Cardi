@@ -7,6 +7,7 @@ import SwiftUI
 
 struct FigmaPhoneCanvas<Content: View>: View {
     var height: CGFloat = CardaTheme.canvasHeight
+    var background: Color = CardaTheme.pageBackground
     @ViewBuilder var content: () -> Content
 
     var body: some View {
@@ -17,7 +18,7 @@ struct FigmaPhoneCanvas<Content: View>: View {
             )
 
             ZStack {
-                CardaTheme.pageBackground
+                background
                     .ignoresSafeArea()
 
                 content()

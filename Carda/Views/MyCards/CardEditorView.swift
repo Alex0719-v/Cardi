@@ -5,12 +5,18 @@
 
 import PhotosUI
 import SwiftUI
+import UIKit
 
 struct CardEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: BusinessCardDraft
     @State private var avatarPickerItem: PhotosPickerItem?
     @State private var logoPickerItem: PhotosPickerItem?
+    @State private var editorScrollPosition = ScrollPosition()
+    @State private var editorScrollOffsetY: CGFloat = 0
+    @State private var focusedDynamicFieldID: UUID?
+    @State private var scrollOffsetBeforeDynamicEditing: CGFloat?
+    @State private var dynamicFieldScrollRequest = 0
 
     let onCommit: (BusinessCardDraft) -> Void
 
@@ -20,7 +26,7 @@ struct CardEditorView: View {
     }
 
     var body: some View {
-        FigmaPhoneCanvas {
+        FigmaPhoneCanvas(background: CardaTheme.editorBackground) {
             editorPage
         }
         .task(id: avatarPickerItem) {
@@ -36,29 +42,44 @@ struct CardEditorView: View {
     }
 
     private var editorPage: some View {
-        ScrollView {
-            ZStack(alignment: .topLeading) {
-                topCardPreview
-                    .offset(x: 16, y: 63)
+        ScrollViewReader { scrollProxy in
+            ScrollView {
+                ZStack(alignment: .topLeading) {
+                    topCardPreview
+                        .offset(x: 16, y: 63)
 
-                avatarPicker
-                    .offset(x: 43, y: 240)
+                    avatarPicker
+                        .offset(x: 43, y: 240)
 
-                identityFields
-                    .offset(x: 16, y: 340)
+                    identityFields
+                        .offset(x: 16, y: 340)
 
-                fixedInfoGroup
-                    .offset(x: 16, y: 425)
+                    fixedInfoGroup
+                        .offset(x: 16, y: 425)
 
-                dynamicFieldsGroup
-                    .offset(x: 16, y: 654)
+                    dynamicFieldsGroup
+                        .offset(x: 16, y: 654)
 
-                addFieldButton
-                    .offset(x: 187, y: addFieldButtonY)
+                    addFieldButton
+                        .offset(x: 187, y: addFieldButtonY)
+                }
+                .frame(width: CardaTheme.canvasWidth, height: editorContentHeight, alignment: .topLeading)
             }
-            .frame(width: CardaTheme.canvasWidth, height: editorContentHeight, alignment: .topLeading)
+            .scrollIndicators(.hidden)
+            .scrollPosition($editorScrollPosition)
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentOffset.y + geometry.contentInsets.top
+            } action: { _, offsetY in
+                editorScrollOffsetY = max(0, offsetY)
+            }
+            .onChange(of: focusedDynamicFieldID) { oldID, newID in
+                guard oldID != nil, newID == nil else { return }
+                restoreScrollAfterDynamicFieldEditing()
+            }
+            .onChange(of: dynamicFieldScrollRequest) {
+                scrollFocusedDynamicField(with: scrollProxy)
+            }
         }
-        .scrollIndicators(.hidden)
         .frame(width: CardaTheme.canvasWidth, height: CardaTheme.canvasHeight)
         .background(CardaTheme.editorBackground)
         .overlay(alignment: .topLeading) {
@@ -110,7 +131,7 @@ struct CardEditorView: View {
         PhotosPicker(selection: $avatarPickerItem, matching: .images) {
             ZStack {
                 Circle()
-                    .fill(Color.black.opacity(0.55))
+                    .fill(CardaTheme.editorAvatarPlaceholder)
                 if draft.avatarImageData != nil {
                     DataImageView(data: draft.avatarImageData)
                         .clipShape(Circle())
@@ -136,7 +157,9 @@ struct CardEditorView: View {
                 color: .black,
                 placeholderColor: .black,
                 lineLimit: 1...1,
-                tracking: 4
+                tracking: 4,
+                focusedPlaceholderOpacity: 0.4,
+                secondNameGlyphOffsetX: -36
             )
             .frame(width: 210, height: 41, alignment: .leading)
 
@@ -148,7 +171,8 @@ struct CardEditorView: View {
                 color: .black,
                 placeholderColor: .black,
                 lineLimit: 1...1,
-                tracking: 16
+                tracking: 16,
+                focusedPlaceholderOpacity: 0.4
             )
             .frame(width: 247, height: 22, alignment: .leading)
             .offset(y: 45)
@@ -171,11 +195,29 @@ struct CardEditorView: View {
                 let field = draft.fields[index]
                 EditableCardFieldRow(
                     field: $draft.fields[index],
-                    showsDeleteButton: index > 0
+                    showsDeleteButton: index > 0,
+                    onEditingWillBegin: {
+                        beginDynamicFieldEditing(field.id)
+                    },
+                    onEditingChanged: { isEditing in
+                        if isEditing {
+                            if focusedDynamicFieldID != field.id {
+                                beginDynamicFieldEditing(field.id)
+                            }
+                        } else if focusedDynamicFieldID == field.id {
+                            focusedDynamicFieldID = nil
+                        }
+                    }
                 ) {
                     removeField(field)
                 }
+                .id(field.id)
                 .offset(y: dynamicRowOffset(for: index))
+
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .id(dynamicFieldScrollAnchorID(for: field.id))
+                    .offset(x: 16, y: dynamicRowOffset(for: index) + 35)
 
                 if index < (draft.fields.indices.last ?? 0) {
                     EditorGroupSeparator()
@@ -185,7 +227,7 @@ struct CardEditorView: View {
             }
         }
         .frame(width: 370, height: dynamicFieldsHeight, alignment: .topLeading)
-        .background(CardaTheme.formFill, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .background(CardaTheme.editorFormFill, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
     }
 
     private func dynamicRowOffset(for index: Int) -> CGFloat {
@@ -207,7 +249,9 @@ struct CardEditorView: View {
     }
 
     private var editorContentHeight: CGFloat {
-        max(CardaTheme.editorCanvasHeight, addFieldButtonY + 72)
+        let baseHeight = max(CardaTheme.editorCanvasHeight, addFieldButtonY + 72)
+        let keyboardClearance: CGFloat = focusedDynamicFieldID == nil ? 0 : 360
+        return baseHeight + keyboardClearance
     }
 
     private static func dynamicRowHeight(for field: CardFieldDraft) -> CGFloat {
@@ -236,13 +280,13 @@ struct CardEditorView: View {
         } label: {
             ZStack(alignment: .topLeading) {
                 Circle()
-                    .fill(Color(red: 120 / 255, green: 120 / 255, blue: 120 / 255))
+                    .fill(CardaTheme.editorAddButtonFill)
                 RoundedRectangle(cornerRadius: 0)
-                    .fill(CardaTheme.separator)
+                    .fill(CardaTheme.editorAddButtonGlyph)
                     .frame(width: 12, height: 2)
                     .offset(x: 8, y: 13)
                 RoundedRectangle(cornerRadius: 0)
-                    .fill(CardaTheme.separator)
+                    .fill(CardaTheme.editorAddButtonGlyph)
                     .frame(width: 2, height: 12)
                     .offset(x: 13, y: 8)
             }
@@ -260,7 +304,61 @@ struct CardEditorView: View {
     private func normalizeFieldOrdering() {
         for index in draft.fields.indices {
             draft.fields[index].sortOrder = index
+            if draft.fields[index].kind == .phone {
+                draft.fields[index].value = PhoneNumberFormatter.format(draft.fields[index].value)
+            }
         }
+    }
+
+    private func beginDynamicFieldEditing(_ fieldID: UUID) {
+        prepareDynamicFieldEditing(fieldID)
+        focusedDynamicFieldID = fieldID
+        dynamicFieldScrollRequest &+= 1
+    }
+
+    private func scrollFocusedDynamicField(with scrollProxy: ScrollViewProxy) {
+        guard let fieldID = focusedDynamicFieldID else { return }
+        let request = dynamicFieldScrollRequest
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            guard focusedDynamicFieldID == fieldID,
+                  dynamicFieldScrollRequest == request else {
+                return
+            }
+
+            withAnimation(.snappy(duration: 0.24)) {
+                scrollProxy.scrollTo(
+                    dynamicFieldScrollAnchorID(for: fieldID),
+                    anchor: UnitPoint(x: 0.5, y: 0.35)
+                )
+            }
+        }
+    }
+
+    private func restoreScrollAfterDynamicFieldEditing() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            guard focusedDynamicFieldID == nil,
+                  let originalOffset = scrollOffsetBeforeDynamicEditing else {
+                return
+            }
+
+            withAnimation(.snappy(duration: 0.28)) {
+                editorScrollPosition.scrollTo(y: originalOffset)
+            }
+            scrollOffsetBeforeDynamicEditing = nil
+        }
+    }
+
+    private func prepareDynamicFieldEditing(_ fieldID: UUID) {
+        guard focusedDynamicFieldID == nil,
+              scrollOffsetBeforeDynamicEditing == nil else {
+            return
+        }
+        scrollOffsetBeforeDynamicEditing = editorScrollOffsetY
+    }
+
+    private func dynamicFieldScrollAnchorID(for fieldID: UUID) -> String {
+        "dynamic-field-input-\(fieldID.uuidString)"
     }
 }
 
@@ -273,7 +371,7 @@ private struct FixedInfoGroup: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .fill(CardaTheme.formFill)
+                .fill(CardaTheme.editorFormFill)
 
             FixedInfoTextRow(title: "公司", text: $organizationName)
                 .offset(y: 0)
@@ -377,6 +475,8 @@ private struct EditorGroupSeparator: View {
 private struct EditableCardFieldRow: View {
     @Binding var field: CardFieldDraft
     let showsDeleteButton: Bool
+    let onEditingWillBegin: () -> Void
+    let onEditingChanged: (Bool) -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -413,10 +513,17 @@ private struct EditableCardFieldRow: View {
                 color: CardaTheme.formSecondaryText,
                 placeholderColor: CardaTheme.formSecondaryText,
                 lineLimit: 1...5,
-                tracking: valueTracking
+                tracking: valueTracking,
+                formatsPhoneNumber: field.kind == .phone,
+                onEditingWillBegin: onEditingWillBegin,
+                onEditingChanged: onEditingChanged
             )
             .frame(width: 338, height: valueHeight, alignment: .topLeading)
             .offset(x: 16, y: valueTop)
+            .onChange(of: field.kind) { _, newKind in
+                guard newKind == .phone else { return }
+                field.value = PhoneNumberFormatter.format(field.value)
+            }
 
             if showsDeleteButton {
                 Button(action: onDelete) {
@@ -508,22 +615,31 @@ private struct FigmaEditorTextField: View {
     let placeholderColor: Color
     let lineLimit: ClosedRange<Int>
     var tracking: CGFloat = 0
+    var focusedPlaceholderOpacity = 1.0
+    var secondNameGlyphOffsetX: CGFloat?
+    var formatsPhoneNumber = false
+    var onEditingWillBegin: () -> Void = {}
+    var onEditingChanged: (Bool) -> Void = { _ in }
     @FocusState private var isFocused: Bool
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             if text.isEmpty {
-                Text(placeholder)
-                    .font(placeholderFont)
-                    .foregroundStyle(placeholderColor)
-                    .tracking(tracking)
-                    .lineLimit(lineLimit.upperBound)
-                    .fixedSize(horizontal: isSingleLine, vertical: false)
-                    .allowsHitTesting(false)
+                placeholderContent
+                    .opacity(isFocused ? focusedPlaceholderOpacity : 1)
+                    .animation(.easeOut(duration: 0.15), value: isFocused)
             }
 
             textInput
         }
+        .onChange(of: isFocused) { _, focused in
+            guard !formatsPhoneNumber else { return }
+            onEditingChanged(focused)
+        }
+        .simultaneousGesture(
+            TapGesture()
+                .onEnded(onEditingWillBegin)
+        )
     }
 
     private var isSingleLine: Bool {
@@ -531,8 +647,45 @@ private struct FigmaEditorTextField: View {
     }
 
     @ViewBuilder
+    private var placeholderContent: some View {
+        if let secondNameGlyphOffsetX {
+            HStack(spacing: 0) {
+                Text("姓        ")
+                    .font(placeholderFont)
+                    .foregroundStyle(placeholderColor)
+                    .tracking(tracking)
+
+                Text("名")
+                    .font(placeholderFont)
+                    .foregroundStyle(placeholderColor)
+                    .tracking(tracking)
+                    .offset(x: secondNameGlyphOffsetX)
+            }
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .allowsHitTesting(false)
+        } else {
+            Text(placeholder)
+                .font(placeholderFont)
+                .foregroundStyle(placeholderColor)
+                .tracking(tracking)
+                .lineLimit(lineLimit.upperBound)
+                .fixedSize(horizontal: isSingleLine, vertical: false)
+                .allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder
     private var textInput: some View {
-        if isSingleLine {
+        if formatsPhoneNumber {
+            PhoneNumberEditorTextField(
+                text: $text,
+                color: color,
+                tracking: tracking,
+                onEditingWillBegin: onEditingWillBegin,
+                onEditingChanged: onEditingChanged
+            )
+        } else if isSingleLine {
             TextField("", text: $text)
                 .focused($isFocused)
                 .font(font)
@@ -554,11 +707,152 @@ private struct FigmaEditorTextField: View {
                 .disableAutocorrection(true)
                 .submitLabel(.done)
                 .onSubmit(dismissKeyboard)
+                .onChange(of: text) { oldValue, newValue in
+                    handleMultilineSubmission(from: oldValue, to: newValue)
+                }
         }
+    }
+
+    private func handleMultilineSubmission(from oldValue: String, to newValue: String) {
+        guard newValue.contains(where: \.isNewline) else { return }
+
+        let valueWithoutLineBreaks = String(newValue.filter { !$0.isNewline })
+        if valueWithoutLineBreaks == oldValue {
+            text = oldValue
+        } else {
+            text = newValue
+                .components(separatedBy: .newlines)
+                .joined(separator: " ")
+        }
+
+        dismissKeyboard()
     }
 
     private func dismissKeyboard() {
         isFocused = false
+    }
+}
+
+private struct PhoneNumberEditorTextField: UIViewRepresentable {
+    @Binding var text: String
+    let color: Color
+    let tracking: CGFloat
+    let onEditingWillBegin: () -> Void
+    let onEditingChanged: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            text: $text,
+            onEditingWillBegin: onEditingWillBegin,
+            onEditingChanged: onEditingChanged
+        )
+    }
+
+    func makeUIView(context: Context) -> UITextField {
+        let textField = UITextField()
+        textField.delegate = context.coordinator
+        textField.addTarget(
+            context.coordinator,
+            action: #selector(Coordinator.textDidChange(_:)),
+            for: .editingChanged
+        )
+        textField.font = .systemFont(ofSize: 17, weight: .regular)
+        textField.textColor = UIColor(color)
+        textField.tintColor = UIColor(CardaTheme.primaryText)
+        textField.backgroundColor = .clear
+        textField.borderStyle = .none
+        textField.autocorrectionType = .no
+        textField.autocapitalizationType = .none
+        textField.returnKeyType = .done
+        textField.clearButtonMode = .never
+        textField.defaultTextAttributes[.kern] = tracking
+        textField.text = PhoneNumberFormatter.format(text)
+        return textField
+    }
+
+    func updateUIView(_ textField: UITextField, context: Context) {
+        let formatted = PhoneNumberFormatter.format(text)
+        guard textField.text != formatted else { return }
+        textField.text = formatted
+    }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        @Binding private var text: String
+        private let onEditingWillBegin: () -> Void
+        private let onEditingChanged: (Bool) -> Void
+
+        init(
+            text: Binding<String>,
+            onEditingWillBegin: @escaping () -> Void,
+            onEditingChanged: @escaping (Bool) -> Void
+        ) {
+            _text = text
+            self.onEditingWillBegin = onEditingWillBegin
+            self.onEditingChanged = onEditingChanged
+        }
+
+        @objc
+        func textDidChange(_ textField: UITextField) {
+            let enteredText = textField.text ?? ""
+            let cursorOffset = textField.selectedTextRange
+                .map { textField.offset(from: textField.beginningOfDocument, to: $0.start) }
+                ?? enteredText.count
+            let digitsBeforeCursor = enteredText
+                .prefix(cursorOffset)
+                .filter(\.isNumber)
+                .count
+            let formatted = PhoneNumberFormatter.format(enteredText)
+
+            textField.text = formatted
+            text = formatted
+
+            let restoredOffset = cursorPosition(
+                afterDigitCount: digitsBeforeCursor,
+                in: formatted
+            )
+            if let position = textField.position(
+                from: textField.beginningOfDocument,
+                offset: restoredOffset
+            ) {
+                textField.selectedTextRange = textField.textRange(
+                    from: position,
+                    to: position
+                )
+            }
+        }
+
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            textField.resignFirstResponder()
+            return false
+        }
+
+        func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool {
+            onEditingWillBegin()
+            return true
+        }
+
+        func textFieldDidBeginEditing(_ textField: UITextField) {
+            onEditingChanged(true)
+        }
+
+        func textFieldDidEndEditing(_ textField: UITextField) {
+            onEditingChanged(false)
+        }
+
+        private func cursorPosition(afterDigitCount digitCount: Int, in value: String) -> Int {
+            guard digitCount > 0 else { return 0 }
+
+            var seenDigits = 0
+            for (offset, character) in value.enumerated() {
+                if character.isNumber {
+                    seenDigits += 1
+                    if seenDigits == digitCount {
+                        return offset + 1
+                    }
+                }
+            }
+            return value.count
+        }
     }
 }
 

@@ -19,14 +19,16 @@ struct TransparentGradientBlur: View {
     var direction: Direction = .bottom
     var tintColor: Color = CardaTheme.pageBackground
     var tintOpacity: Double = 0.5
+    var matchesOpaqueEdgeColor = false
 
     var body: some View {
         ZStack {
-            MaximumBackdropBlurMaterial()
+            ZStack {
+                MaximumBackdropBlurMaterial()
 
-            tintColor
-                .opacity(tintOpacity)
-        }
+                tintColor
+                    .opacity(tintOpacity)
+            }
             .mask(
                 LinearGradient(
                     stops: maskStops,
@@ -34,8 +36,17 @@ struct TransparentGradientBlur: View {
                     endPoint: .bottom
                 )
             )
-            .frame(width: width, height: height)
-            .allowsHitTesting(false)
+
+            if matchesOpaqueEdgeColor {
+                LinearGradient(
+                    stops: edgeColorStops,
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+        }
+        .frame(width: width, height: height)
+        .allowsHitTesting(false)
     }
 
     private var maskStops: [Gradient.Stop] {
@@ -55,6 +66,25 @@ struct TransparentGradientBlur: View {
                 Gradient.Stop(color: $0.color, location: 1 - $0.location)
             }
             .reversed())
+        }
+    }
+
+    private var edgeColorStops: [Gradient.Stop] {
+        let bottomStops = [
+            Gradient.Stop(color: .clear, location: 0),
+            Gradient.Stop(color: .clear, location: 0.76),
+            Gradient.Stop(color: tintColor.opacity(0.28), location: 0.9),
+            Gradient.Stop(color: tintColor, location: 1)
+        ]
+
+        switch direction {
+        case .top:
+            return Array(bottomStops.map {
+                Gradient.Stop(color: $0.color, location: 1 - $0.location)
+            }
+            .reversed())
+        case .bottom:
+            return bottomStops
         }
     }
 }

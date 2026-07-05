@@ -181,6 +181,8 @@ private struct SVGElement {
     nonisolated private static func paintColor(named name: String?, opacity: Double) -> Color? {
         guard let name, name != "none" else { return nil }
         switch name {
+        case "white":
+            return Color.white.opacity(opacity)
         case "black":
             return Color.black.opacity(opacity)
         case "#141414":

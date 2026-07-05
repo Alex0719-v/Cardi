@@ -6,6 +6,7 @@
 import Combine
 import Foundation
 import MultipeerConnectivity
+import OSLog
 import UIKit
 
 final class CardExchangeCoordinator: ObservableObject {
@@ -18,21 +19,24 @@ final class CardExchangeCoordinator: ObservableObject {
         var sentExchangeIDs: Set<UUID> = []
         var receivedExchangeIDs: Set<UUID> = []
         var lastDistance: Float?
-        var lastDirection: SIMD3<Float>?
+        var lastDistanceUpdatedAt: Date?
     }
 
     private enum Constants {
-        static let topTouchDistanceThreshold: Float = 0.12
-        static let topDirectionMinimumY: Float = 0.45
-        static let stableContactDuration: TimeInterval = 0.5
+        static let cardaExchangeDistanceThreshold: Float = 0.05
+        static let distanceReadingTTL: TimeInterval = 1.25
+        static let stableCloseDuration: TimeInterval = 0
         static let peerCooldown: TimeInterval = 5
     }
 
     @Published var statusMessage: String?
+    @Published private(set) var outgoingCardAnimationID: UUID?
 
     var onReceivedCard: ((CardExchangePayload) -> Void)?
+    var onOutgoingCardSent: (() -> Void)?
 
     private let transport = MultipeerExchangeTransport()
+    private let logger = Logger(subsystem: "com.Alex.Carda", category: "CardExchange")
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var peerStates: [MCPeerID: PeerState] = [:]
@@ -60,11 +64,13 @@ final class CardExchangeCoordinator: ObservableObject {
 
         guard NearbyExchangeRangingSession.isSupported else {
             statusMessage = "当前设备不支持近距离交换"
+            logger.error("Start failed: Nearby Interaction precise distance unsupported")
             return
         }
 
         isRunning = true
         transport.start()
+        logger.info("Card exchange started")
     }
 
     func updateLocalCard(_ card: CardRenderData) {
@@ -81,10 +87,12 @@ final class CardExchangeCoordinator: ObservableObject {
         }
         peerStates.removeAll()
         localPayload = nil
+        logger.info("Card exchange stopped")
     }
 
     private func handlePeerConnected(_ peerID: MCPeerID) {
         guard isRunning else { return }
+        logger.info("Peer connected: \(peerID.displayName, privacy: .public)")
 
         let rangingSession = makeRangingSession(for: peerID)
         var state = peerStates[peerID] ?? PeerState()
@@ -93,6 +101,7 @@ final class CardExchangeCoordinator: ObservableObject {
 
         guard let tokenData = rangingSession.localDiscoveryTokenData() else {
             send(.error("附近识别令牌创建失败"), to: peerID)
+            logger.error("Failed to create local NI discovery token for \(peerID.displayName, privacy: .public)")
             return
         }
 
@@ -100,6 +109,7 @@ final class CardExchangeCoordinator: ObservableObject {
     }
 
     private func handlePeerDisconnected(_ peerID: MCPeerID) {
+        logger.info("Peer disconnected: \(peerID.displayName, privacy: .public)")
         peerStates[peerID]?.rangingSession?.invalidate()
         peerStates.removeValue(forKey: peerID)
     }
@@ -150,6 +160,9 @@ final class CardExchangeCoordinator: ObservableObject {
         rangingSession.onRemoved = { [weak self] peerID in
             self?.resetContactState(for: peerID)
         }
+        rangingSession.onInvalidated = { [weak self] peerID in
+            self?.handleRangingInvalidated(for: peerID)
+        }
         rangingSession.onFailure = { [weak self] peerID, message in
             self?.resetContactState(for: peerID)
             self?.statusMessage = message
@@ -160,32 +173,56 @@ final class CardExchangeCoordinator: ObservableObject {
     private func handleNearbyUpdate(
         peerID: MCPeerID,
         distance: Float,
-        direction: SIMD3<Float>?
+        direction _: SIMD3<Float>?
     ) {
         guard isRunning else { return }
 
         var state = peerStates[peerID] ?? PeerState()
         state.lastDistance = distance
-        state.lastDirection = direction
+        state.lastDistanceUpdatedAt = Date()
+        logger.info("NI update peer=\(peerID.displayName, privacy: .public) distance=\(distance, format: .fixed(precision: 3))")
 
-        guard isTopTouch(distance: distance, direction: direction) else {
+        let now = Date()
+        guard isCardaExchangeProximity(
+            distance: distance,
+            updatedAt: state.lastDistanceUpdatedAt,
+            now: now
+        ) else {
             state.stableCloseSince = nil
             state.didTriggerCurrentContact = false
             peerStates[peerID] = state
             return
         }
 
-        let now = Date()
         if state.stableCloseSince == nil {
             state.stableCloseSince = now
-            peerStates[peerID] = state
+        }
+        peerStates[peerID] = state
+        evaluateProximityExchange(for: peerID)
+    }
+
+    private func handleRangingInvalidated(for peerID: MCPeerID) {
+        guard isRunning, let rangingSession = peerStates[peerID]?.rangingSession else { return }
+        resetContactState(for: peerID)
+        guard let tokenData = rangingSession.localDiscoveryTokenData() else {
+            logger.error("Failed to recreate local NI discovery token for \(peerID.displayName, privacy: .public)")
             return
         }
+
+        logger.info("Re-sending NI discovery token after invalidation for \(peerID.displayName, privacy: .public)")
+        send(.nearbyToken(tokenData), to: peerID)
+    }
+
+    private func evaluateProximityExchange(for peerID: MCPeerID) {
+        guard isRunning else { return }
+
+        var state = peerStates[peerID] ?? PeerState()
+        let now = Date()
 
         guard
             !state.didTriggerCurrentContact,
             let stableCloseSince = state.stableCloseSince,
-            now.timeIntervalSince(stableCloseSince) >= Constants.stableContactDuration
+            now.timeIntervalSince(stableCloseSince) >= Constants.stableCloseDuration
         else {
             peerStates[peerID] = state
             return
@@ -193,6 +230,7 @@ final class CardExchangeCoordinator: ObservableObject {
 
         state.didTriggerCurrentContact = true
         peerStates[peerID] = state
+        logger.info("Proximity exchange confirmed peer=\(peerID.displayName, privacy: .public) distance=\(state.lastDistance ?? -1, format: .fixed(precision: 3))")
 
         let exchangeID = UUID()
         if let cardID = localPayload?.sourceCardID {
@@ -201,10 +239,20 @@ final class CardExchangeCoordinator: ObservableObject {
         sendCardIfAllowed(to: peerID, exchangeID: exchangeID)
     }
 
-    private func isTopTouch(distance: Float, direction: SIMD3<Float>?) -> Bool {
-        guard distance <= Constants.topTouchDistanceThreshold else { return false }
-        guard let direction else { return true }
-        return direction.y >= Constants.topDirectionMinimumY
+    private func isCardaExchangeProximity(
+        distance: Float?,
+        updatedAt: Date?,
+        now: Date
+    ) -> Bool {
+        guard
+            let distance,
+            let updatedAt,
+            now.timeIntervalSince(updatedAt) <= Constants.distanceReadingTTL
+        else {
+            return false
+        }
+
+        return distance <= Constants.cardaExchangeDistanceThreshold
     }
 
     private func resetContactState(for peerID: MCPeerID) {
@@ -212,7 +260,7 @@ final class CardExchangeCoordinator: ObservableObject {
         state.stableCloseSince = nil
         state.didTriggerCurrentContact = false
         state.lastDistance = nil
-        state.lastDirection = nil
+        state.lastDistanceUpdatedAt = nil
         peerStates[peerID] = state
     }
 
@@ -237,7 +285,10 @@ final class CardExchangeCoordinator: ObservableObject {
         state.sentExchangeIDs.insert(exchangeID)
         state.lastSentCardAt = now
         peerStates[peerID] = state
+        statusMessage = "已触发 Carda 近距离交换"
+        logger.info("Sending card to \(peerID.displayName, privacy: .public)")
         send(.card(payload, exchangeID: exchangeID), to: peerID)
+        notifyOutgoingCardSent()
     }
 
     private func handleReceivedCard(
@@ -267,12 +318,45 @@ final class CardExchangeCoordinator: ObservableObject {
 
         send(.ack(exchangeID: exchangeID), to: peerID)
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        statusMessage = "已收到\(payload.displayName)的名片"
+        statusMessage = "收到\(payload.displayName)的名片"
+        logger.info("Received card from \(peerID.displayName, privacy: .public)")
         onReceivedCard?(payload)
     }
 
     private func send(_ message: CardExchangeMessage, to peerID: MCPeerID) {
         guard let data = try? encoder.encode(message) else { return }
         transport.send(data, to: peerID)
+        logger.debug("Sent \(message.kind.rawValue, privacy: .public) to \(peerID.displayName, privacy: .public)")
     }
+
+    private func notifyOutgoingCardSent() {
+        outgoingCardAnimationID = UUID()
+        onOutgoingCardSent?()
+    }
+
+    #if DEBUG && targetEnvironment(simulator)
+    func simulateProximityExchange(with card: CardRenderData) {
+        let simulatedDistance: Float = 0.04
+        guard isCardaExchangeProximity(
+            distance: simulatedDistance,
+            updatedAt: Date(),
+            now: Date()
+        ) else {
+            statusMessage = "模拟碰一碰未达到触发条件"
+            return
+        }
+
+        var payload = CardExchangePayload(data: card)
+        payload.sourceCardID = UUID()
+        if payload.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            payload.name = "模拟对方"
+        } else {
+            payload.name += "（模拟对方）"
+        }
+
+        let peerID = MCPeerID(displayName: "Carda-SimulatorPeer")
+        notifyOutgoingCardSent()
+        handleReceivedCard(payload, exchangeID: UUID(), from: peerID)
+    }
+    #endif
 }

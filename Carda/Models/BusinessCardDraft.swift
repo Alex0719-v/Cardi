@@ -70,7 +70,9 @@ struct BusinessCardDraft: Identifiable, Hashable {
             CardFieldDraft(
                 id: $0.id,
                 kind: $0.kind,
-                value: $0.value,
+                value: $0.kind == .phone
+                    ? PhoneNumberFormatter.format($0.value)
+                    : $0.value,
                 sortOrder: $0.sortOrder
             )
         }
@@ -131,5 +133,11 @@ struct CardRenderData: Identifiable, Hashable {
     var displayOrganizationName: String {
         let trimmed = organizationName.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "公司" : trimmed
+    }
+}
+
+extension CardFieldDraft {
+    var displayValue: String {
+        kind == .phone ? PhoneNumberFormatter.format(value) : value
     }
 }

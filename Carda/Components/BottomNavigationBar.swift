@@ -30,77 +30,134 @@ struct BottomNavigationBar: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            if isSearchActive {
+            if usesWideSearchLayout {
                 searchActiveControls
             } else {
-                normalControls
+                morphingIdleControls
             }
         }
         .frame(width: CardaTheme.canvasWidth, height: 95, alignment: .topLeading)
     }
 
-    private var normalControls: some View {
+    private var morphingIdleControls: some View {
         ZStack(alignment: .topLeading) {
             FigmaGlassShape(cornerRadius: 296)
-                .frame(width: 191, height: 62)
-                .offset(x: 21, y: 12)
+                .frame(width: isSearchActive ? 62 : 191, height: 62)
+                .offset(x: isSearchActive ? 20.5 : 21, y: 12)
                 .allowsHitTesting(false)
 
             RoundedRectangle(cornerRadius: 100, style: .continuous)
                 .fill(CardaTheme.selectedTabFill)
-                .frame(width: 98, height: 54)
-                .offset(x: selectedSection == .myCards ? 25 : 109, y: 16)
+                .frame(width: isSearchActive ? 54 : 98, height: 54)
+                .offset(
+                    x: isSearchActive
+                        ? 24.5
+                        : (selectedSection == .myCards ? 25 : 109),
+                    y: 16
+                )
+                .opacity(isSearchActive ? 0 : 1)
+                .animation(.snappy(duration: 0.28), value: selectedSection)
                 .allowsHitTesting(false)
 
             MyCardsTabIcon(isSelected: selectedSection == .myCards)
-                .offset(x: 27, y: 16)
+                .offset(x: isSearchActive ? 5 : 27, y: 16)
+                .opacity(
+                    isSearchActive && selectedSection != .myCards ? 0 : 1
+                )
+                .animation(unselectedIconAnimation, value: isSearchActive)
 
             CardHolderTabIcon(isSelected: selectedSection == .cardHolder)
-                .offset(x: 113, y: 16)
+                .offset(x: isSearchActive ? 1 : 113, y: 16)
+                .opacity(
+                    isSearchActive && selectedSection != .cardHolder ? 0 : 1
+                )
+                .animation(unselectedIconAnimation, value: isSearchActive)
 
-            Button {
-                selectedSection = .myCards
-                isSearchActive = false
-                isSearchEditing = false
-            } label: {
-                NavigationHitArea()
-                    .frame(width: 94, height: 54)
-            }
-            .buttonStyle(.plain)
-            .offset(x: 27, y: 16)
-            .accessibilityLabel("我的名片")
-
-            Button {
-                selectedSection = .cardHolder
-                isSearchActive = false
-                isSearchEditing = false
-            } label: {
-                NavigationHitArea()
-                    .frame(width: 94, height: 54)
-            }
-            .buttonStyle(.plain)
-            .offset(x: 113, y: 16)
-            .accessibilityLabel("名片夹")
-
-            Button {
-                isSearchActive = true
-                isSearchEditing = false
-            } label: {
-                ZStack {
-                    FigmaGlassShape(cornerRadius: 296, interactive: true)
+            if isSearchActive {
+                Button {
+                    withAnimation(navigationMorphAnimation) {
+                        isSearchActive = false
+                    }
+                } label: {
+                    NavigationHitArea()
                         .frame(width: 62, height: 62)
-                    SearchGlyph()
-                        .stroke(CardaTheme.primaryText, style: StrokeStyle(lineWidth: 2.6, lineCap: .round))
-                        .frame(width: 23, height: 23)
-                        .frame(width: 54, height: 54)
                 }
-                .frame(width: 62, height: 62)
-                .contentShape(Circle())
+                .buttonStyle(.plain)
+                .offset(x: 20.5, y: 12)
+                .accessibilityLabel(selectedSection.title)
+            } else {
+                Button {
+                    selectedSection = .myCards
+                    isSearchEditing = false
+                } label: {
+                    NavigationHitArea()
+                        .frame(width: 94, height: 54)
+                }
+                .buttonStyle(.plain)
+                .offset(x: 27, y: 16)
+                .accessibilityLabel("我的名片")
+
+                Button {
+                    selectedSection = .cardHolder
+                    isSearchEditing = false
+                } label: {
+                    NavigationHitArea()
+                        .frame(width: 94, height: 54)
+                }
+                .buttonStyle(.plain)
+                .offset(x: 113, y: 16)
+                .accessibilityLabel("名片夹")
             }
-            .buttonStyle(.plain)
-            .offset(x: 319, y: 12)
-            .accessibilityLabel("搜索")
+
+            FigmaGlassShape(cornerRadius: 296, interactive: true)
+                .frame(width: isSearchActive ? 279 : 62, height: 62)
+                .offset(x: isSearchActive ? 103 : 319, y: 12)
+                .allowsHitTesting(false)
+
+            SearchGlyph()
+                .stroke(
+                    CardaTheme.primaryText,
+                    style: StrokeStyle(lineWidth: isSearchActive ? 2.2 : 2.6, lineCap: .round)
+                )
+                .frame(
+                    width: isSearchActive ? 20 : 23,
+                    height: isSearchActive ? 20 : 23
+                )
+                .position(x: isSearchActive ? 131 : 350, y: 43)
+                .allowsHitTesting(false)
+
+            if isSearchActive {
+                TextField("", text: $searchText)
+                    .font(CardaTheme.pingFang(size: 17))
+                    .disableAutocorrection(true)
+                    .submitLabel(.done)
+                    .allowsHitTesting(false)
+                    .frame(width: 213, height: 62, alignment: .leading)
+                    .offset(x: 151, y: 12)
+
+                Button(action: activateSearchField) {
+                    NavigationHitArea()
+                        .frame(width: 279, height: 62)
+                }
+                .buttonStyle(.plain)
+                .offset(x: 103, y: 12)
+                .accessibilityLabel("搜索")
+            } else {
+                Button {
+                    withAnimation(navigationMorphAnimation) {
+                        isSearchActive = true
+                        isSearchEditing = false
+                    }
+                } label: {
+                    NavigationHitArea()
+                        .frame(width: 62, height: 62)
+                }
+                .buttonStyle(.plain)
+                .offset(x: 319, y: 12)
+                .accessibilityLabel("搜索")
+            }
         }
+        .animation(navigationMorphAnimation, value: isSearchActive)
     }
 
     private var searchActiveControls: some View {
@@ -196,6 +253,15 @@ struct BottomNavigationBar: View {
         isSearchEditing || hasSearchText
     }
 
+    private var navigationMorphAnimation: Animation {
+        .timingCurve(0.4, 0, 0.2, 1, duration: 0.42)
+    }
+
+    private var unselectedIconAnimation: Animation {
+        let animation = Animation.timingCurve(0.4, 0, 0.2, 1, duration: 0.26)
+        return isSearchActive ? animation : animation.delay(0.16)
+    }
+
     private func activateSearchField() {
         isSearchEditing = true
         DispatchQueue.main.async {
@@ -204,9 +270,11 @@ struct BottomNavigationBar: View {
     }
 
     private func clearSearch() {
-        searchText = ""
-        searchFieldFocused = false
-        isSearchEditing = false
+        withAnimation(navigationMorphAnimation) {
+            searchText = ""
+            searchFieldFocused = false
+            isSearchEditing = false
+        }
     }
 }
 

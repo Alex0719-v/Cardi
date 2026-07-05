@@ -27,7 +27,7 @@ enum CardLayoutCalculator {
     }
 
     static func infoLineCount(for field: CardFieldDraft) -> Int {
-        let trimmed = field.value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = field.displayValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return 1 }
 
         #if canImport(UIKit)
@@ -81,7 +81,7 @@ enum CardLayoutCalculator {
 struct BusinessCardView: View {
     let data: CardRenderData
     var width: CGFloat = CardaTheme.cardWidth
-    var showsCardShadow = true
+    var onInfoAction: ((CardFieldDraft) -> Void)?
 
     private var scale: CGFloat {
         width / CardaTheme.cardWidth
@@ -119,12 +119,6 @@ struct BusinessCardView: View {
 
         return shape
             .fill(Color.white, style: FillStyle(eoFill: true))
-            .shadow(
-                color: .black.opacity(showsCardShadow ? 0.25 : 0),
-                radius: showsCardShadow ? 2 * scale : 0,
-                x: 0,
-                y: 0
-            )
             .overlay {
                 CardPhotoBackground(width: width, height: height)
                     .mask {
@@ -348,7 +342,7 @@ struct BusinessCardView: View {
             VStack(alignment: .trailing, spacing: 6 * scale) {
                 ForEach(fields, id: \.id) { field in
                     let lineCount = CardLayoutCalculator.infoLineCount(for: field)
-                    Text(field.value)
+                    Text(field.displayValue)
                         .font(infoFont(for: field.kind, size: 14 * scale))
                         .foregroundStyle(CardaTheme.secondaryText)
                         .multilineTextAlignment(.trailing)
@@ -383,7 +377,7 @@ struct BusinessCardView: View {
     private var actionButtonColumn: some View {
         VStack(spacing: 5 * scale) {
             ForEach(actionButtonFields, id: \.id) { field in
-                CardActionButton(kind: field.kind, scale: scale)
+                CardActionButton(field: field, scale: scale, action: onInfoAction)
             }
         }
         .frame(width: 34 * scale, height: actionButtonColumnHeight * scale, alignment: .top)
@@ -435,17 +429,48 @@ private extension Path {
 }
 
 private struct CardActionButton: View {
-    let kind: CardFieldKind
+    let field: CardFieldDraft
     let scale: CGFloat
+    let action: ((CardFieldDraft) -> Void)?
 
     var body: some View {
+        if let action {
+            Button {
+                action(field)
+            } label: {
+                buttonContent
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(actionAccessibilityLabel)
+        } else {
+            buttonContent
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var buttonContent: some View {
         Circle()
             .fill(Color.white)
             .frame(width: 34 * scale, height: 34 * scale)
             .overlay {
-                CardFieldIconView(kind: kind, scale: scale)
+                CardFieldIconView(kind: field.kind, scale: scale)
                     .frame(width: 20 * scale, height: 20 * scale)
             }
+    }
+
+    private var actionAccessibilityLabel: String {
+        switch field.kind {
+        case .phone:
+            "电话"
+        case .email:
+            "邮箱"
+        case .address:
+            "地址"
+        case .link:
+            "链接"
+        case .companyLogo:
+            "公司LOGO"
+        }
     }
 }
 

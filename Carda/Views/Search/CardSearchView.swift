@@ -9,14 +9,17 @@ struct CardSearchView: View {
     let cardHolderCards: [BusinessCard]
     let searchText: String
     let isEditing: Bool
+    var showsPageBackground = true
 
     @State private var expandedCardID: UUID?
     @Namespace private var searchCardNamespace
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            CardaTheme.pageBackground
-                .frame(width: CardaTheme.canvasWidth, height: CardaTheme.canvasHeight)
+            if showsPageBackground {
+                CardaTheme.searchBackground
+                    .frame(width: CardaTheme.canvasWidth, height: CardaTheme.canvasHeight)
+            }
 
             ScrollView {
                 if query.isEmpty {
@@ -29,12 +32,21 @@ struct CardSearchView: View {
             .zIndex(1)
 
             if query.isEmpty {
-                TransparentGradientBlur(height: 119, direction: .top)
+                TransparentGradientBlur(
+                    height: 119,
+                    direction: .top,
+                    tintColor: CardaTheme.searchBackground,
+                    matchesOpaqueEdgeColor: true
+                )
                     .offset(y: 0)
                     .zIndex(2)
             }
 
-            TransparentGradientBlur(height: 140)
+            TransparentGradientBlur(
+                height: 140,
+                tintColor: CardaTheme.searchBackground,
+                matchesOpaqueEdgeColor: true
+            )
                 .offset(y: isEditing ? 433 : 737)
                 .zIndex(2)
 
@@ -116,7 +128,12 @@ struct CardSearchView: View {
     private var fieldMatches: [BusinessCard] {
         cardHolderCards.filter { card in
             card.fields.contains { field in
-                field.value.localizedCaseInsensitiveContains(query)
+                if field.kind == .phone {
+                    let queryDigits = PhoneNumberFormatter.digits(in: query)
+                    return !queryDigits.isEmpty
+                        && PhoneNumberFormatter.digits(in: field.value).contains(queryDigits)
+                }
+                return field.value.localizedCaseInsensitiveContains(query)
             }
         }
     }

@@ -14,8 +14,13 @@ enum CardaTheme {
     static let cardCornerRadius: CGFloat = 24
 
     static let pageBackground = Color(red: 249 / 255, green: 248 / 255, blue: 251 / 255)
-    static let myCardsBackground = Color(red: 225 / 255, green: 224 / 255, blue: 227 / 255)
-    static let editorBackground = pageBackground
+    static let searchBackground = Color(red: 216 / 255, green: 215 / 255, blue: 219 / 255)
+    static let myCardsBackground = searchBackground
+    static let editorBackground = searchBackground
+    static let editorFormFill = Color(red: 243 / 255, green: 243 / 255, blue: 243 / 255)
+    static let editorAvatarPlaceholder = Color(red: 89 / 255, green: 89 / 255, blue: 89 / 255)
+    static let editorAddButtonFill = Color.white
+    static let editorAddButtonGlyph = editorBackground
     static let mainAccent = Color(red: 0.996, green: 0.475, blue: 0.235)
     static let selectedTabFill = Color(red: 0.929, green: 0.929, blue: 0.929)
     static let primaryText = Color(red: 0.102, green: 0.102, blue: 0.102)
@@ -25,6 +30,9 @@ enum CardaTheme {
     static let formGroupSeparator = Color(red: 0.902, green: 0.902, blue: 0.902)
     static let separator = Color(red: 0.902, green: 0.902, blue: 0.902)
     static let destructive = Color(red: 1, green: 56 / 255, blue: 60 / 255)
+    static let pageIndicatorFill = Color(red: 207 / 255, green: 206 / 255, blue: 211 / 255)
+    static let pageIndicatorActiveDot = Color.white
+    static let pageIndicatorInactiveDot = searchBackground
 
     static func pingFang(size: CGFloat, weight: Font.Weight = .regular) -> Font {
         switch weight {

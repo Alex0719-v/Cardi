@@ -55,19 +55,27 @@
 - 修改名片生成规则前必须确认，因为这是当前最复杂、最关键的功能。
 - 写代码、改资源或调整设计规则时，必须根据用户最新指令同步维护相关 `.md` 文件，不能让文档滞后于实现。
 - 若用户明确指定资源来源，例如 `My icon/` 或 `Card photo/`，实现和文档都必须记录该来源，不得继续引用旧实现方式。
-- 名片右侧操作按钮中的手机、邮箱、地址、链接图标来源为 `My icon/Phone.svg`、`My icon/Mail.svg`、`My icon/Map pin.svg`、`My icon/Link.svg`；不得继续使用旧的 SwiftUI 手绘版本，也不得用 `WKWebView` / HTML 异步加载本地图标。
+- 名片右侧操作按钮中的手机、邮箱、地址、链接图标来源为 `My icon/Phone.svg`、`My icon/Mail.svg`、`My icon/Map pin.svg`、`My icon/Link.svg`；名片夹删除按钮图标来源为 `My icon/Trash 2.svg`；不得继续使用旧的 SwiftUI 手绘版本，也不得用 `WKWebView` / HTML 异步加载本地图标。
+- 名片夹展开完整名片中的手机、邮箱、地址、链接按钮使用 Figma `10064:3390` / `Group 72` 的自绘固定弹窗，不使用系统 action sheet；弹窗由 `AppShellView` 绘制在页面最顶层，固定 x=51、y=675、w=300、h=153，不随名片位置变化。弹窗下方一层渐变背景模糊蒙必须从 y=675 覆盖到屏幕底部并遮住底部菜单栏；弹窗出现时从屏幕底部用 S 型曲线自然滑入。弹窗正文显示字段内容，左侧统一 `复制` 写入 `UIPasteboard`；右侧按钮按字段类型为 `拨打`、`邮件`、`查询`、`前往`，分别打开 `tel://`、`mailto:`、Apple Maps 查询和默认浏览器。
 - 底部导航和名片右侧操作按钮这类高频重建区域中的本地 SVG 图标必须复用 `LocalSVGIconView` 的缓存解析和 SwiftUI `Canvas` 渲染路径，避免页面切换或名片滑动时出现闪烁、延迟。
-- 名片交换当前边界：不得调用 AirDrop、NameDrop 或 NFC；只在双方都打开 Carda、都停留在“我的名片”页面、当前有名片且未进入创建/编辑或添加弹窗时启用。实现位于 `Services/CardExchange/`，使用 Multipeer Connectivity 发现/连接/传输 discovery token 与名片 payload，使用 Nearby Interaction 读取 `distance` / `direction`。当前顶部碰一碰触发阈值为 `distance <= 0.12m`、稳定 0.5 秒；`direction` 可用时要求 `direction.y >= 0.45`，不可用时仅按距离和稳定时间判断；同一 peer 发送与接收各自 5 秒冷却。当前只实现功能，不实现交换成功动画；`Info.plist` 必须保留本地网络用途说明与 `_carda-ex._tcp` Bonjour service。
+- 灵动岛 / Live Activity 交换 UI 暂停实现：当前工程不得保留 `CardaExchangeLiveActivity` Widget Extension、`ExchangeLiveActivityController`、`ExchangeLiveActivityAttributes` 或 `NSSupportsLiveActivities`。后续如重新接入灵动岛，必须等用户明确恢复该需求后再设计。
+- 名片交换当前边界：不得调用 AirDrop、NameDrop 或 NFC；只在双方都打开 Carda、都停留在“我的名片”页面、当前有名片且未进入创建/编辑或添加弹窗时启用。iOS 系统 NameDrop / Bringing Devices Together 不能被第三方 App 关闭，因此 Carda 不接管系统顶部贴合手势，而是在 App 内使用 5cm 距离门槛确认交换；这里的“碰一碰”指距离足够靠近，不指物理碰撞或加速度碰撞。实现位于 `Services/CardExchange/`，使用 Multipeer Connectivity 发现/连接/传输 discovery token 与名片 payload，使用 Nearby Interaction 读取 `distance`，当前交换距离阈值为 `distance <= 0.05m`；同一 peer 发送与接收各自 5 秒冷却。发送当前名片时播放 App 内“递出名片”动画：名片复制层放大 6pt 并下移 3pt，停顿 0.25 秒后在 0.3 秒内用 S 型曲线快速向上离开屏幕；递出动画完整结束后必须停顿 0.1 秒，才开始接收名片动画。接收态按 Figma `10050:2742` 显示背景模糊和左右上角按钮，对方名片在 0.3 秒内滑到 x=16、y=326、w=370；3 秒未拒绝则自动接收，并在 0.3 秒内缩小到 1/5 后收纳到左下角名片夹图标方向，动画结束后才写入 `ownerKind = .received`。交换动画中的名片和名片右侧圆形按钮不绘制阴影。`Info.plist` 必须保留本地网络用途说明和 `_carda-ex._tcp` Bonjour service。模拟器不能验证真实 UWB，但 DEBUG + Simulator 可通过 `CARDA_ENABLE_EXCHANGE_SIMULATION=1` 显示手动模拟按钮，并通过 `CARDA_AUTO_SIMULATE_EXCHANGE=1` 自动触发一次模拟保存链路；该入口不得进入 Release 或真机正式体验。
+- Nearby Interaction 的 timeout / invalidation 属于可恢复测距状态：timeout 后要重新 `run`，invalidation 后要重建 `NISession` 并重新发送 discovery token，不得把“近距离测距已停止”作为常驻错误提示展示。
 - 当前全局字体规则为中文 PingFang SC、英文 SF Pro；视觉或文本相关改动必须遵守并同步记录。
 - “我的名片”页面背景以 Figma `10063:3262` 为准，使用 `MyCardsBackground` / `#E1E0E3`，不得回退到全局 `PageBackground`；该页面的完整名片不绘制名片本体外框阴影。
 - 完整名片外框、右下按钮裁切槽、折叠名片和空名片占位卡必须使用普通 `.circular` / 圆弧圆角，不使用 Corner smoothing、`.continuous` 或平滑圆角。
 - 创建/编辑页的动态字段类型只包含手机、邮箱、地址、链接；公司 logo 属于固定 LOGO 上传行，不得重新加入动态字段选择菜单。
 - 创建/编辑页的公司/职位/LOGO 固定信息组必须独立实现和定位，不得复用动态字段行组件；否则动态高度、点击层或分隔线容易导致公司栏和 LOGO 行跑偏。
 - 创建/编辑页文本输入控件必须使用确认/完成提交键并在 `onSubmit` 中释放焦点；动态字段可因宽度自动换行，但键盘不得继续显示换行键而导致无法主动收起。
+- SwiftUI 的 `TextField(axis: .vertical)` 可能把 `.submitLabel(.done)` 仍作为换行处理；动态字段必须保留换行拦截逻辑，检测到新增 `newline` 后恢复文本并释放焦点。
+- 手机字段格式化必须复用 `PhoneNumberFormatter`，不得在编辑页和名片展示层分别手写分组规则。显示采用 `3 4 4`，拨号和搜索采用纯数字。
+- 动态字段输入必须上报焦点状态给 `CardEditorView`。键盘输入时临时增加足够的底部滚动空间，并使用字段稳定 ID 滚动到键盘上方；结束后恢复进入动态字段输入前的 `ScrollPosition` 并移除临时空间。不得依赖系统在固定 Figma 画布内自动避让。
 - 名片夹顶部栏、分类栏、模式切换、空状态和示例数据导入属于名片夹核心交互，修改时必须同步记录 Figma 节点、坐标规则与数据来源。
 - 名片夹列表模式使用 `BusinessCard.cardListID` 表达唯一归属；不得用重叠索引范围或多个列表 ID 让同一张名片重复出现。无有效归属的名片必须进入最底部 `未分类`。列表模式展开出的折叠名片可拖放到其他列表行以更新 `cardListID`；投放到 `未分类` 时写入 `nil`，拖回原列表不得重复保存。折叠名片进入可更换所属列表的系统拖拽状态时，必须立即收起来源列表，并在收起动画完成后滚回来源列表行顶部，避免列表卡在屏幕外；若拖拽取消、投放失败、投回原列表或保存失败，必须恢复之前因拖动收起的来源列表，并滚回拖拽开始前的滚动位置。折叠名片拖拽源必须使用 `UIDragInteraction` 桥接，在 `itemsForBeginning` 中记录拖拽源、来源列表和当前滚动偏移，在 drag session end 中兜底恢复仍未成功清理的拖拽；不能只用 SwiftUI `.onDrag`，因为它没有可靠的结束回调。投回原列表和保存失败这类已处理失败必须返回已消费，恢复或成功投放的收尾期必须使用过期时间戳短暂忽略列表行点击/长按，避免松手触发列表行 `toggle` 后刚展开又收起；不得用 `draggingListCardID` 等可能残留的拖拽状态作为长期手势拦截条件，用户下一次明确列表操作前必须清理残留拖拽状态；不得再叠加辅助 `DragGesture` 做位移检测，也不得使用 drag preview 的 `onDisappear` 作为拖拽结束信号，避免抢占普通滚动或在拖拽刚开始时误恢复展开。
 - 新版名片夹以 Figma `10063:3011` / `10064:3390` / `10064:3656` 为准：页面底色为白色叠加 `#303136` 6%，内容面板为白色叠加 `#C3C2C8`；不得继续套用旧版 `PageBackground` 顶部栏、灰线和黑色下划线。顶部列表/姓名/公司切换必须按 Figma Union path 绘制，选中项必须先将内容面板与顶部标签矩形拼合再统一倒角，且圆角使用普通 `.circular` / 圆弧圆角，不使用 Corner smoothing、`.continuous` 或平滑圆角；未选中项为白色布尔标签并按 Figma 三态固定镜像映射绘制：列表态姓名/公司为右尾，姓名态列表为左尾、公司为右尾，公司态列表/姓名为左尾；不得用普通圆角矩形近似。
 - 名片夹姓名/公司模式滚动视口从 y=164 开始，以 24pt 透明顶部安全区让分组标题起始在 x=16、y≈188；索引及悬顶容器必须透明，不得出现遮挡名片的背景色块。下一索引距旧索引底部 10pt 时，旧索引必须同步上移并渐隐，不能使用无过渡的标题替换。
+- 名片夹姓名/公司模式必须按 Figma `10064:3390` 的 `渐变遮罩` 图层在名片上方增加 x=16、y=178、w=370、h=79 的渐变遮罩；名片超过 y=178 的部分必须被裁切，顶部标题栏、右上角头像、分段标签和分组标题必须位于该遮罩上方，不得被遮住。
+- 名片夹折叠名片和展开完整名片都必须支持左滑删除：未展开态参考 Figma `10592:4167`，使用 44pt 红色圆形按钮与 24pt 垃圾桶图标；展开态参考 Figma `9574:2114`，保留动态高度长条按钮并使用 24pt 图标。删除按钮普通状态下必须隐藏且不可点击，仅在左滑释放进入删除模式后显示；名片位置回归正常后继续隐藏。同一页面只允许一张名片处于删除模式，开始左滑另一张时必须先自动收起前一张。删除按钮点击后必须先弹出确认，用户确认后才删除对应 `BusinessCard`。
 - 新版姓名/公司模式顶部 `Scroll Edge Effect - Soft` 在 Figma 中为隐藏状态，不再显式渲染旧版顶部 `TransparentGradientBlur(height: 63.255, direction: .top)`；名片夹滚动视口必须延伸到画板底部，不得在底部导航上沿 y=779 裁切折叠名片。底部只允许一层 y=737、h=140 的 `TransparentGradientBlur` 最大渐变背景模糊，禁止额外实色色块、面板色块或裁切层；右侧 A-Z/# 索引必须位于内容前景层。
 - 名片夹列表模式的第二行及后续行分隔线使用 Figma iOS Light Row Separator 对应的 `#C6C6C8`；最顶行上方不显示分隔线。
 - Carda 是固定浅色视觉系统，必须保留应用根视图的 `.preferredColorScheme(.light)`。涉及 Liquid Glass、SwiftUI Material 或 `UIVisualEffectView` 的修改，至少需要在模拟器深色模式下复测一次，确认系统材质不会变成深灰/黑色。

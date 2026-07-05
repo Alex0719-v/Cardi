@@ -5,6 +5,9 @@
 
 import SwiftData
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 private enum CardEditorMode: Identifiable {
     case create
@@ -29,17 +32,72 @@ private enum CardEditorMode: Identifiable {
     }
 }
 
+private struct OutgoingCardSnapshot: Identifiable, Equatable {
+    let id = UUID()
+    let data: CardRenderData
+}
+
+private struct PendingReceivedCardExchange: Identifiable, Equatable {
+    let id = UUID()
+    let payload: CardExchangePayload
+
+    var renderData: CardRenderData {
+        payload.renderData
+    }
+
+    static func == (lhs: PendingReceivedCardExchange, rhs: PendingReceivedCardExchange) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
+private extension CardExchangePayload {
+    var renderData: CardRenderData {
+        CardRenderData(
+            id: sourceCardID,
+            name: name,
+            phoneticName: phoneticName,
+            position: position,
+            organizationName: organizationName,
+            avatarImageData: avatarImageData,
+            companyLogoImageData: companyLogoImageData,
+            fields: fields.map {
+                CardFieldDraft(
+                    kind: $0.kind,
+                    value: $0.value,
+                    sortOrder: $0.sortOrder
+                )
+            }
+        )
+    }
+}
+
+#if DEBUG && targetEnvironment(simulator)
+@MainActor
+private enum SimulatorExchangeAutomation {
+    static var didRun = false
+}
+#endif
+
 struct MyCardsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \BusinessCard.createdAt) private var allCards: [BusinessCard]
 
     let accountAvatarImageData: Data?
+    let accountName: String?
+    let accountEmail: String?
+    var showsPageBackground = true
 
     @State private var selectedIndex = 0
     @State private var editorMode: CardEditorMode?
     @State private var isAddSheetPresented = false
     @State private var isContextMenuVisible = false
     @State private var saveMessage: String?
+    @State private var outgoingCardSnapshot: OutgoingCardSnapshot?
+    @State private var outgoingAnimationEndsAt: Date?
+    @State private var pendingReceivedCard: PendingReceivedCardExchange?
+    @State private var queuedReceivedCard: PendingReceivedCardExchange?
+    @State private var delayedReceiveWorkItem: DispatchWorkItem?
+    @State private var receiveScheduleID = UUID()
     @StateObject private var exchangeCoordinator = CardExchangeCoordinator()
 
     private var myCards: [BusinessCard] {
@@ -56,8 +114,10 @@ struct MyCardsView: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .topLeading) {
-                CardaTheme.myCardsBackground
-                    .frame(width: CardaTheme.canvasWidth, height: CardaTheme.canvasHeight)
+                if showsPageBackground {
+                    CardaTheme.myCardsBackground
+                        .frame(width: CardaTheme.canvasWidth, height: CardaTheme.canvasHeight)
+                }
 
                 ScreenHeader(
                     title: "我的名片",
@@ -76,6 +136,39 @@ struct MyCardsView: View {
                         PageIndicatorCapsule(count: myCards.count, selectedIndex: selectedIndex)
                             .position(x: proxy.size.width / 2, y: 760)
                     }
+                }
+
+                if let outgoingCardSnapshot {
+                    OutgoingCardSendOffView(
+                        snapshot: outgoingCardSnapshot,
+                        width: min(370, proxy.size.width - 32),
+                        screenSize: proxy.size,
+                        cardCenterY: 268,
+                        onFinished: { completedID in
+                            if outgoingCardSnapshot.id == completedID {
+                                self.outgoingCardSnapshot = nil
+                                self.outgoingAnimationEndsAt = nil
+                                scheduleQueuedReceivedCardPresentation()
+                            }
+                        }
+                    )
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .zIndex(8)
+                }
+
+                if let pendingReceivedCard {
+                    ReceivedCardExchangeOverlay(
+                        exchange: pendingReceivedCard,
+                        width: min(370, proxy.size.width - 32),
+                        screenSize: proxy.size,
+                        cardTop: 326,
+                        cardHolderIconCenter: CGPoint(x: 163.5, y: 822),
+                        onReject: rejectReceivedCard,
+                        onAccepted: finishReceivingCard
+                    )
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .transition(.opacity)
+                    .zIndex(9)
                 }
 
                 if isContextMenuVisible {
@@ -126,15 +219,35 @@ struct MyCardsView: View {
                         .position(x: proxy.size.width / 2, y: 600)
                         .transition(.opacity.combined(with: .scale))
                 }
+
+                #if DEBUG && targetEnvironment(simulator)
+                if isExchangeSimulationEnabled, let currentCard {
+                    Button("模拟碰一碰") {
+                        exchangeCoordinator.simulateProximityExchange(with: currentCard.renderData)
+                    }
+                    .font(CardaTheme.pingFang(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 112, height: 38)
+                    .background(Capsule().fill(Color.black.opacity(0.72)))
+                    .position(x: proxy.size.width / 2, y: 708)
+                    .accessibilityIdentifier("debug.simulateExchange")
+                    .zIndex(12)
+                }
+                #endif
             }
         }
         .sheet(isPresented: $isAddSheetPresented) {
-            AddCardSheet {
+            AddCardSheet(
+                accountAvatarImageData: accountAvatarImageData,
+                accountName: accountName,
+                accountEmail: accountEmail
+            ) {
                 isAddSheetPresented = false
                 editorMode = .create
             }
             .presentationDetents([.height(465), .large])
             .presentationDragIndicator(.visible)
+            .presentationBackground(Color.white)
         }
         .cardEditorPresentation(item: $editorMode) { mode in
             CardEditorView(initialDraft: mode.draft) { draft in
@@ -144,9 +257,15 @@ struct MyCardsView: View {
         .onChange(of: myCards.count) { _, count in
             selectedIndex = min(selectedIndex, max(0, count - 1))
             refreshExchangeSession()
+            #if DEBUG && targetEnvironment(simulator)
+            runAutomaticExchangeSimulationIfNeeded()
+            #endif
         }
         .onChange(of: currentCard?.id) { _, _ in
             refreshExchangeSession()
+            #if DEBUG && targetEnvironment(simulator)
+            runAutomaticExchangeSimulationIfNeeded()
+            #endif
         }
         .onChange(of: currentCard?.updatedAt) { _, _ in
             refreshExchangeSession()
@@ -166,10 +285,19 @@ struct MyCardsView: View {
             }
         }
         .onAppear {
-            exchangeCoordinator.onReceivedCard = insertReceivedCard
+            #if DEBUG && targetEnvironment(simulator)
+            seedSimulatorExchangeCardIfNeeded()
+            #endif
+            exchangeCoordinator.onReceivedCard = presentReceivedCard
+            exchangeCoordinator.onOutgoingCardSent = startOutgoingCardAnimation
             refreshExchangeSession()
+            #if DEBUG && targetEnvironment(simulator)
+            runAutomaticExchangeSimulationIfNeeded()
+            #endif
         }
         .onDisappear {
+            delayedReceiveWorkItem?.cancel()
+            receiveScheduleID = UUID()
             exchangeCoordinator.stop()
         }
     }
@@ -177,6 +305,16 @@ struct MyCardsView: View {
     private var feedbackMessage: String? {
         saveMessage ?? exchangeCoordinator.statusMessage
     }
+
+    #if DEBUG && targetEnvironment(simulator)
+    private var isExchangeSimulationEnabled: Bool {
+        ProcessInfo.processInfo.environment["CARDA_ENABLE_EXCHANGE_SIMULATION"] == "1"
+    }
+
+    private var shouldAutoRunExchangeSimulation: Bool {
+        ProcessInfo.processInfo.environment["CARDA_AUTO_SIMULATE_EXCHANGE"] == "1"
+    }
+    #endif
 
     private var emptyState: some View {
         Button {
@@ -263,15 +401,130 @@ struct MyCardsView: View {
         exchangeCoordinator.updateLocalCard(currentCard.renderData)
     }
 
+    private func presentReceivedCard(_ payload: CardExchangePayload) {
+        let exchange = PendingReceivedCardExchange(payload: payload)
+        queuedReceivedCard = exchange
+        delayedReceiveWorkItem?.cancel()
+        receiveScheduleID = UUID()
+
+        if currentCard != nil {
+            startOutgoingCardAnimation()
+        }
+
+        scheduleQueuedReceivedCardPresentation()
+    }
+
+    private func showReceivedCard(_ exchange: PendingReceivedCardExchange) {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            pendingReceivedCard = exchange
+        }
+    }
+
+    private func scheduleQueuedReceivedCardPresentation() {
+        guard let exchange = queuedReceivedCard else { return }
+        delayedReceiveWorkItem?.cancel()
+        let receiveDelay = queuedReceiveDelay()
+        let scheduleID = UUID()
+        receiveScheduleID = scheduleID
+        let item = DispatchWorkItem {
+            guard receiveScheduleID == scheduleID else { return }
+            self.queuedReceivedCard = nil
+            showReceivedCard(exchange)
+        }
+        delayedReceiveWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + receiveDelay, execute: item)
+    }
+
+    private func queuedReceiveDelay() -> TimeInterval {
+        let postOutgoingPause: TimeInterval = 0.1
+        guard let outgoingAnimationEndsAt else { return postOutgoingPause }
+        return max(postOutgoingPause, outgoingAnimationEndsAt.timeIntervalSinceNow + postOutgoingPause)
+    }
+
+    private func rejectReceivedCard(_ id: UUID) {
+        guard pendingReceivedCard?.id == id else { return }
+        delayedReceiveWorkItem?.cancel()
+        receiveScheduleID = UUID()
+        withAnimation(.easeInOut(duration: 0.18)) {
+            pendingReceivedCard = nil
+        }
+        exchangeCoordinator.statusMessage = "已拒绝名片"
+    }
+
+    private func finishReceivingCard(_ id: UUID) {
+        guard let pendingReceivedCard, pendingReceivedCard.id == id else { return }
+        delayedReceiveWorkItem?.cancel()
+        receiveScheduleID = UUID()
+        insertReceivedCard(pendingReceivedCard.payload)
+        withAnimation(.easeInOut(duration: 0.18)) {
+            self.pendingReceivedCard = nil
+        }
+    }
+
     private func insertReceivedCard(_ payload: CardExchangePayload) {
         modelContext.insert(payload.receivedBusinessCard())
 
         do {
             try modelContext.save()
+            exchangeCoordinator.statusMessage = "已接收\(payload.displayName)的名片"
         } catch {
             exchangeCoordinator.statusMessage = "交换名片保存失败"
         }
     }
+
+    private func startOutgoingCardAnimation() {
+        guard let currentCard else { return }
+        if outgoingCardSnapshot != nil {
+            if outgoingAnimationEndsAt == nil {
+                outgoingAnimationEndsAt = Date().addingTimeInterval(OutgoingCardSendOffView.totalDuration)
+            }
+            return
+        }
+        outgoingCardSnapshot = OutgoingCardSnapshot(data: currentCard.renderData)
+        outgoingAnimationEndsAt = Date().addingTimeInterval(OutgoingCardSendOffView.totalDuration)
+    }
+
+    #if DEBUG && targetEnvironment(simulator)
+    private func seedSimulatorExchangeCardIfNeeded() {
+        guard isExchangeSimulationEnabled, myCards.isEmpty else { return }
+
+        let draft = BusinessCardDraft(
+            name: "Carda 测试",
+            phoneticName: "Carda Test",
+            position: "产品体验",
+            organizationName: "Carda",
+            fields: [
+                CardFieldDraft(kind: .phone, value: "13800019999", sortOrder: 0),
+                CardFieldDraft(kind: .email, value: "test@carda.local", sortOrder: 1),
+                CardFieldDraft(kind: .link, value: "https://carda.local", sortOrder: 2)
+            ]
+        )
+        modelContext.insert(BusinessCard(draft: draft))
+
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            exchangeCoordinator.statusMessage = "模拟名片创建失败"
+        }
+    }
+
+    private func runAutomaticExchangeSimulationIfNeeded() {
+        guard
+            isExchangeSimulationEnabled,
+            shouldAutoRunExchangeSimulation,
+            !SimulatorExchangeAutomation.didRun,
+            let currentCard
+        else {
+            return
+        }
+
+        SimulatorExchangeAutomation.didRun = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            exchangeCoordinator.simulateProximityExchange(with: currentCard.renderData)
+        }
+    }
+    #endif
 
     private func saveCurrentCard(_ card: BusinessCard) {
         let ok = CardImageExporter.savePNG(for: card.renderData)
@@ -304,6 +557,287 @@ struct MyCardsView: View {
     }
 }
 
+private struct OutgoingCardSendOffView: View {
+    let snapshot: OutgoingCardSnapshot
+    let width: CGFloat
+    let screenSize: CGSize
+    let cardCenterY: CGFloat
+    let onFinished: (UUID) -> Void
+
+    @State private var pullOutProgress: CGFloat = 0
+    @State private var flightStartDate: Date?
+
+    private let pullOutDuration: TimeInterval = 0.18
+    private let holdDuration: TimeInterval = 0.25
+    private let flightDuration: TimeInterval = 0.3
+
+    static let totalDuration: TimeInterval = 0.18 + 0.25 + 0.3
+
+    private var height: CGFloat {
+        CardLayoutCalculator.height(for: snapshot.data) * width / CardaTheme.cardWidth
+    }
+
+    private var pulledScale: CGFloat {
+        (width + 6) / width
+    }
+
+    private var flightTargetScale: CGFloat {
+        1
+    }
+
+    private var flightTargetCenterY: CGFloat {
+        -height / 2 - 32
+    }
+
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let linearFlightProgress = elapsedFlightProgress(at: timeline.date)
+            let flightProgress = smoothStep(linearFlightProgress)
+            let pullDown = 3 * pullOutProgress
+            let currentScale = pulledScale + (flightTargetScale - pulledScale) * flightProgress
+            let currentYOffset = pullDown + (flightTargetCenterY - cardCenterY - pullDown) * flightProgress
+
+            ZStack(alignment: .topLeading) {
+                BusinessCardView(data: snapshot.data, width: width)
+                    .scaleEffect(currentScale)
+                    .rotationEffect(.degrees(-0.45 * pullOutProgress * (1 - flightProgress)))
+                    .offset(y: currentYOffset)
+                    .opacity(1 - max(0, flightProgress - 0.86) / 0.14)
+                    .position(x: screenSize.width / 2, y: cardCenterY)
+            }
+        }
+        .frame(width: screenSize.width, height: screenSize.height)
+        .allowsHitTesting(false)
+        .id(snapshot.id)
+        .task(id: snapshot.id) {
+            await runAnimation()
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func elapsedFlightProgress(at date: Date) -> CGFloat {
+        guard let flightStartDate else { return 0 }
+        return min(max(date.timeIntervalSince(flightStartDate) / flightDuration, 0), 1)
+    }
+
+    private func smoothStep(_ value: CGFloat) -> CGFloat {
+        value * value * (3 - 2 * value)
+    }
+
+    @MainActor
+    private func runAnimation() async {
+        pullOutProgress = 0
+        flightStartDate = nil
+
+        withAnimation(.interpolatingSpring(stiffness: 560, damping: 34)) {
+            pullOutProgress = 1
+        }
+
+        try? await Task.sleep(nanoseconds: UInt64((pullOutDuration + holdDuration) * 1_000_000_000))
+        flightStartDate = Date()
+        try? await Task.sleep(nanoseconds: UInt64(flightDuration * 1_000_000_000))
+        onFinished(snapshot.id)
+    }
+}
+
+private struct ReceivedCardExchangeOverlay: View {
+    let exchange: PendingReceivedCardExchange
+    let width: CGFloat
+    let screenSize: CGSize
+    let cardTop: CGFloat
+    let cardHolderIconCenter: CGPoint
+    let onReject: (UUID) -> Void
+    let onAccepted: (UUID) -> Void
+
+    @State private var blurOpacity: Double = 0
+    @State private var entranceStartDate: Date?
+    @State private var collectStartDate: Date?
+    @State private var isCollecting = false
+    @State private var didFinish = false
+
+    private let entranceDuration: TimeInterval = 0.3
+    private let blurDuration: TimeInterval = 0.2
+    private let autoAcceptDelay: TimeInterval = 3
+    private let collectDuration: TimeInterval = 0.3
+
+    private var height: CGFloat {
+        CardLayoutCalculator.height(for: exchange.renderData) * width / CardaTheme.cardWidth
+    }
+
+    private var entranceSourceCenterY: CGFloat {
+        -height / 2 - 32
+    }
+
+    private var entranceSourceScale: CGFloat {
+        (width + 6) / width
+    }
+
+    private var cardTargetCenterY: CGFloat {
+        cardTop + height / 2
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ReceiveBackdropBlur()
+                .opacity(blurOpacity)
+                .frame(width: screenSize.width, height: screenSize.height)
+                .overlay {
+                    Color(red: 158 / 255, green: 158 / 255, blue: 158 / 255)
+                        .opacity(0.5 * blurOpacity)
+                }
+                .contentShape(Rectangle())
+
+            receivedCard
+
+            receiveActionButton(
+                title: "拒绝",
+                width: 72,
+                action: {
+                    guard !isCollecting else { return }
+                    onReject(exchange.id)
+                }
+            )
+            .position(x: 52, y: 90)
+
+            receiveActionButton(
+                title: "分到列表",
+                width: 112,
+                action: {
+                    startCollecting()
+                }
+            )
+            .position(x: 330, y: 90)
+        }
+        .frame(width: screenSize.width, height: screenSize.height)
+        .id(exchange.id)
+        .task(id: exchange.id) {
+            await runPresentation()
+        }
+    }
+
+    private var receivedCard: some View {
+        TimelineView(.animation) { timeline in
+            let entranceProgress = smoothStep(elapsedProgress(
+                from: entranceStartDate,
+                at: timeline.date,
+                duration: entranceDuration
+            ))
+            let collectProgress = smoothStep(elapsedProgress(
+                from: collectStartDate,
+                at: timeline.date,
+                duration: collectDuration
+            ))
+
+            let entranceCenter = CGPoint(
+                x: screenSize.width / 2,
+                y: entranceSourceCenterY + (cardTargetCenterY - entranceSourceCenterY) * entranceProgress
+            )
+            let entranceScale = entranceSourceScale + (1 - entranceSourceScale) * entranceProgress
+            let x = entranceCenter.x + (cardHolderIconCenter.x - entranceCenter.x) * collectProgress
+            let y = entranceCenter.y + (cardHolderIconCenter.y - entranceCenter.y) * collectProgress
+            let scale = entranceScale + (0.2 - entranceScale) * collectProgress
+            let opacity = 1 - max(0, collectProgress - 0.86) / 0.14
+
+            BusinessCardView(data: exchange.renderData, width: width)
+                .scaleEffect(scale)
+                .opacity(opacity)
+                .position(x: x, y: y)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func receiveActionButton(
+        title: String,
+        width: CGFloat,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(CardaTheme.pingFang(size: 17, weight: .medium))
+                .foregroundStyle(Color.black)
+                .frame(width: width, height: 46)
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .background(
+            FigmaGlassShape(cornerRadius: 296, interactive: true)
+                .frame(width: width, height: 46)
+        )
+        .opacity(blurOpacity)
+        .disabled(isCollecting)
+        .accessibilityLabel(title)
+    }
+
+    private func elapsedProgress(from startDate: Date?, at date: Date, duration: TimeInterval) -> CGFloat {
+        guard let startDate else { return 0 }
+        return min(max(date.timeIntervalSince(startDate) / duration, 0), 1)
+    }
+
+    private func smoothStep(_ value: CGFloat) -> CGFloat {
+        value * value * (3 - 2 * value)
+    }
+
+    @MainActor
+    private func runPresentation() async {
+        blurOpacity = 0
+        entranceStartDate = Date()
+        collectStartDate = nil
+        isCollecting = false
+        didFinish = false
+
+        withAnimation(.easeInOut(duration: blurDuration)) {
+            blurOpacity = 1
+        }
+
+        try? await Task.sleep(nanoseconds: UInt64(autoAcceptDelay * 1_000_000_000))
+        guard !Task.isCancelled else { return }
+        startCollecting()
+    }
+
+    @MainActor
+    private func startCollecting() {
+        guard !isCollecting, !didFinish else { return }
+        isCollecting = true
+        collectStartDate = Date()
+
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(collectDuration * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            didFinish = true
+            onAccepted(exchange.id)
+        }
+    }
+}
+
+private struct ReceiveBackdropBlur: View {
+    var body: some View {
+        #if canImport(UIKit)
+        ReceiveBackdropBlurRepresentable()
+        #else
+        Rectangle()
+            .fill(.regularMaterial)
+        #endif
+    }
+}
+
+#if canImport(UIKit)
+private struct ReceiveBackdropBlurRepresentable: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        let view = UIVisualEffectView(effect: UIBlurEffect(style: .light))
+        view.backgroundColor = .clear
+        view.contentView.backgroundColor = .clear
+        return view
+    }
+
+    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {
+        uiView.effect = UIBlurEffect(style: .light)
+        uiView.backgroundColor = .clear
+        uiView.contentView.backgroundColor = .clear
+    }
+}
+#endif
+
 private struct MyCardCarousel: View {
     private static let cardSpacing: CGFloat = 32
     private static let pageAnimationDuration: TimeInterval = 0.18
@@ -318,7 +852,7 @@ private struct MyCardCarousel: View {
         ZStack {
             ForEach(visibleSlots, id: \.self) { slot in
                 if let card = card(for: slot) {
-                    BusinessCardView(data: card.renderData, width: width, showsCardShadow: false)
+                    BusinessCardView(data: card.renderData, width: width)
                         .id("\(card.id.uuidString)-\(slot)")
                         .offset(x: CGFloat(slot) * pageStride + dragOffset)
                 }
@@ -423,77 +957,174 @@ private struct PageIndicatorCapsule: View {
         HStack(spacing: 12) {
             ForEach(0..<count, id: \.self) { index in
                 Circle()
-                    .fill(index == selectedIndex ? Color.white : Color(red: 0.929, green: 0.929, blue: 0.929))
+                    .fill(
+                        index == selectedIndex
+                            ? CardaTheme.pageIndicatorActiveDot
+                            : CardaTheme.pageIndicatorInactiveDot
+                    )
                     .frame(width: 8, height: 8)
             }
         }
         .frame(width: CGFloat(count * 20), height: 20)
         .background(
             Capsule()
-                .fill(Color(red: 0.851, green: 0.851, blue: 0.851))
+                .fill(CardaTheme.pageIndicatorFill)
         )
     }
 }
 
 struct AddCardSheet: View {
+    let accountAvatarImageData: Data?
+    let accountName: String?
+    let accountEmail: String?
     let onAdd: () -> Void
 
+    init(
+        accountAvatarImageData: Data?,
+        accountName: String? = nil,
+        accountEmail: String? = nil,
+        onAdd: @escaping () -> Void
+    ) {
+        self.accountAvatarImageData = accountAvatarImageData
+        self.accountName = accountName
+        self.accountEmail = accountEmail
+        self.onAdd = onAdd
+    }
+
     var body: some View {
-        VStack(spacing: 22) {
+        ZStack(alignment: .topLeading) {
+            Color.white
+
             Button(action: onAdd) {
-                HStack {
-                    Text("添加名片")
-                        .font(CardaTheme.pingFang(size: 17))
-                        .foregroundStyle(CardaTheme.primaryText)
-                    Spacer()
-                    Image(systemName: "plus")
-                        .foregroundStyle(CardaTheme.mainAccent)
-                }
-                .padding(.horizontal, 16)
-                .frame(height: 52)
-                .background(RoundedRectangle(cornerRadius: 14).fill(Color.white))
+                Text("添加名片")
+                    .font(CardaTheme.pingFang(size: 17))
+                    .foregroundStyle(Color.black)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .contentShape(Capsule())
             }
             .buttonStyle(.plain)
+            .frame(width: 370, height: 52)
+            .background(Capsule().fill(sheetItemFill))
+            .offset(x: 16, y: 53)
+            .accessibilityLabel("添加名片")
 
-            HStack(spacing: 14) {
-                Circle()
-                    .fill(.ultraThinMaterial)
-                    .frame(width: 52, height: 52)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("账户")
-                        .font(CardaTheme.pingFang(size: 17, weight: .medium))
-                    Text("账户信息、头像及设置")
-                        .font(CardaTheme.pingFang(size: 14))
-                        .foregroundStyle(CardaTheme.formSecondaryText)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(CardaTheme.formSecondaryText)
-            }
-            .padding(.horizontal, 18)
-            .frame(height: 100)
-            .background(RoundedRectangle(cornerRadius: 20).fill(Color.white))
+            accountCard
+                .offset(x: 16, y: 132)
 
-            VStack(spacing: 0) {
-                ForEach(["分享个人主页", "导入名片图片", "设置", "帮助"], id: \.self) { title in
-                    Text(title)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .frame(height: 52)
-                        .padding(.horizontal, 16)
-                        .font(CardaTheme.pingFang(size: 16))
-                    if title != "帮助" {
-                        Divider().padding(.leading, 16)
-                    }
-                }
-            }
-            .background(RoundedRectangle(cornerRadius: 20).fill(Color.white))
+            actionRow(title: "设置", showsChevron: true)
+                .offset(x: 16, y: 259)
 
-            Spacer()
+            actionRow(title: "关联应用", showsChevron: true)
+                .offset(x: 16, y: 338)
+
+            actionRow(title: "退出登录")
+                .offset(x: 16, y: 417)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 36)
-        .background(CardaTheme.pageBackground)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.white)
+    }
+
+    private var accountCard: some View {
+        ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 26, style: .circular)
+                .fill(sheetItemFill)
+
+            Group {
+                if isLoggedIn, accountAvatarImageData != nil {
+                    DataImageView(data: accountAvatarImageData)
+                } else {
+                    Circle()
+                        .fill(Color(red: 128 / 255, green: 128 / 255, blue: 128 / 255))
+                }
+            }
+            .frame(width: 52, height: 52)
+            .clipShape(Circle())
+            .offset(x: 19, y: 24)
+
+            Text(accountNameText)
+                .font(CardaTheme.pingFang(size: 22, weight: .semibold))
+                .foregroundStyle(Color.black)
+                .frame(height: 22, alignment: .leading)
+                .offset(x: 84, y: 28)
+
+            Text(verbatim: accountEmailText)
+                .font(
+                    isLoggedIn
+                        ? CardaTheme.sfPro(size: 15)
+                        : CardaTheme.pingFang(size: 15)
+                )
+                .foregroundStyle(Color.black.opacity(0.5))
+                .frame(height: 20, alignment: .leading)
+                .offset(x: 84, y: 56)
+
+            drillInChevron
+                .offset(x: 342, y: 39)
+        }
+        .frame(width: 370, height: 100)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var isLoggedIn: Bool {
+        normalizedAccountName != nil && normalizedAccountEmail != nil
+    }
+
+    private var normalizedAccountName: String? {
+        normalized(accountName)
+    }
+
+    private var normalizedAccountEmail: String? {
+        normalized(accountEmail)
+    }
+
+    private var accountNameText: String {
+        guard isLoggedIn else { return "未登陆" }
+        return normalizedAccountName ?? "未登陆"
+    }
+
+    private var accountEmailText: String {
+        guard isLoggedIn else { return "登陆邮箱" }
+        return normalizedAccountEmail ?? "登陆邮箱"
+    }
+
+    private func normalized(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func actionRow(title: String, showsChevron: Bool = false) -> some View {
+        ZStack(alignment: .topLeading) {
+            Capsule()
+                .fill(sheetItemFill)
+
+            Text(title)
+                .font(CardaTheme.pingFang(size: 17))
+                .foregroundStyle(Color.black)
+                .frame(height: 22, alignment: .leading)
+                .offset(x: 19, y: 15)
+
+            if showsChevron {
+                drillInChevron
+                    .offset(x: 342, y: 15)
+            }
+        }
+        .frame(width: 370, height: 52)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var sheetItemFill: Color {
+        CardaTheme.searchBackground.opacity(0.5)
+    }
+
+    private var drillInChevron: some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(
+                Color(red: 60 / 255, green: 60 / 255, blue: 67 / 255)
+                    .opacity(0.3)
+            )
+            .frame(width: 8, height: 22)
     }
 }
 
