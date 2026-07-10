@@ -35,6 +35,10 @@ struct CollapsedCardRow: View {
             }
         }
         .frame(width: 370, height: 60)
+        // The matched-geometry snapshot must carry the runway silhouette itself.
+        // A rounded background alone still leaves a rectangular snapshot boundary.
+        .clipShape(RoundedRectangle(cornerRadius: 30, style: .circular))
+        .compositingGroup()
         .modifier(CollapsedCardMatchModifier(id: data.id, namespace: namespace))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(data.displayName)

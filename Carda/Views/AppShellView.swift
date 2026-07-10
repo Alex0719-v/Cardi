@@ -46,6 +46,11 @@ struct AppShellView: View {
         nil
     }
 
+    private var isAccountLoggedIn: Bool {
+        normalizedAccountValue(accountName) != nil
+            && normalizedAccountValue(accountEmail) != nil
+    }
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             activePageBackground
@@ -63,7 +68,7 @@ struct AppShellView: View {
                 searchFieldFocused: $searchFieldFocused
             )
             .offset(x: 0, y: bottomNavigationTop)
-            .animation(.snappy(duration: 0.28), value: bottomNavigationTop)
+            .animation(searchLiftAnimation, value: bottomNavigationTop)
             .zIndex(1)
 
             if isAddListDialogPresented {
@@ -127,6 +132,10 @@ struct AppShellView: View {
         isSearchActive && isSearchEditing ? 448 : 779
     }
 
+    private var searchLiftAnimation: Animation {
+        .timingCurve(0.4, 0, 0.2, 1, duration: 0.32)
+    }
+
     private var activePageKey: String {
         if isSearchActive {
             return "search"
@@ -151,6 +160,7 @@ struct AppShellView: View {
                     accountAvatarImageData: accountAvatarImageData,
                     accountName: accountName,
                     accountEmail: accountEmail,
+                    isAccountLoggedIn: isAccountLoggedIn,
                     showsPageBackground: false
                 )
                 .transition(.opacity)
@@ -158,6 +168,9 @@ struct AppShellView: View {
                 CardHolderView(
                     cards: cardHolderCards,
                     accountAvatarImageData: accountAvatarImageData,
+                    accountName: accountName,
+                    accountEmail: accountEmail,
+                    isAccountLoggedIn: isAccountLoggedIn,
                     onAddList: presentAddListDialog,
                     onRenameList: presentRenameListDialog,
                     onDeleteList: presentDeleteListConfirmation,
@@ -207,6 +220,12 @@ struct AppShellView: View {
 
     private var cardHolderCards: [BusinessCard] {
         cards.filter { $0.ownerKind == .received }
+    }
+
+    private func normalizedAccountValue(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private var contactPopupAnimation: Animation {

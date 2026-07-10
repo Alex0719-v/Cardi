@@ -7,17 +7,23 @@ import SwiftUI
 
 struct UserAvatarButton: View {
     var imageData: Data?
+    var isLoggedIn = false
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
             ZStack {
-                FigmaGlassShape(cornerRadius: 296, interactive: true)
+                if isLoggedIn {
+                    Circle()
+                        .fill(Color.white.opacity(0.001))
 
-                if imageData != nil {
-                    DataImageView(data: imageData)
-                        .frame(width: 44, height: 44)
-                        .clipShape(Circle())
+                    if imageData != nil {
+                        DataImageView(data: imageData)
+                            .frame(width: 44, height: 44)
+                            .clipShape(Circle())
+                    }
+                } else {
+                    FigmaGlassShape(cornerRadius: 296, interactive: true)
                 }
             }
             .frame(width: 44, height: 44)
@@ -31,6 +37,7 @@ struct UserAvatarButton: View {
 struct ScreenHeader: View {
     let title: String
     var avatarImageData: Data?
+    var isAccountLoggedIn = false
     var avatarAction: () -> Void = {}
 
     var body: some View {
@@ -41,8 +48,11 @@ struct ScreenHeader: View {
                 .foregroundStyle(CardaTheme.primaryText)
                 .frame(height: 41, alignment: .leading)
             Spacer()
-            UserAvatarButton(imageData: avatarImageData, action: avatarAction)
-                .padding(.top, 2)
+            UserAvatarButton(
+                imageData: avatarImageData,
+                isLoggedIn: isAccountLoggedIn,
+                action: avatarAction
+            )
         }
         .padding(.horizontal, 16)
         .padding(.top, 62)

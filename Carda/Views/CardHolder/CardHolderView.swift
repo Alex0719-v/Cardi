@@ -30,6 +30,9 @@ struct CardHolderView: View {
 
     let cards: [BusinessCard]
     let accountAvatarImageData: Data?
+    let accountName: String?
+    let accountEmail: String?
+    let isAccountLoggedIn: Bool
     let onAddList: () -> Void
     let onRenameList: (BusinessCardList) -> Void
     let onDeleteList: (BusinessCardList) -> Void
@@ -42,6 +45,10 @@ struct CardHolderView: View {
     @State private var editorMode: HolderCardEditorMode?
     @State private var isAddSheetPresented = false
     @State private var isContextMenuVisible = false
+    @State private var contextMenuCardID: UUID?
+    @State private var cardFrames: [UUID: CGRect] = [:]
+    @State private var contextMenuDragStartOffsetY: CGFloat?
+    @State private var contextMenuDragDismissProgress: CGFloat = 0
     @State private var listContextMenuListID: UUID?
     @State private var listContextMenuRowID: String?
     @State private var listModeRowFrames: [String: CGRect] = [:]
@@ -53,6 +60,8 @@ struct CardHolderView: View {
     @State private var listScrollRequest: ListScrollRequest?
     @State private var listScrollPosition = ScrollPosition()
     @State private var listScrollOffsetY: CGFloat = 0
+    @State private var groupedScrollPosition = ScrollPosition()
+    @State private var groupedScrollOffsetY: CGFloat = 0
     @State private var ignoreListRowGesturesUntil = Date.distantPast
     @State private var saveMessage: String?
     @State private var cardPendingDeletionID: UUID?
@@ -61,8 +70,6 @@ struct CardHolderView: View {
     @State private var delayedGroupedHeaderTitles: Set<String> = []
     @State private var groupedHeaderTransitionGeneration = 0
     @State private var suppressGroupedContentAnimation = false
-    @Namespace private var cardExpansionNamespace
-
     private let groupedHeaderHeight: CGFloat = 20
     private let groupedHeaderTransitionGap: CGFloat = 10
     private let holderPanelTop: CGFloat = 126
@@ -110,13 +117,12 @@ struct CardHolderView: View {
                         .frame(width: proxy.size.width, height: proxy.size.height)
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            withAnimation(.snappy(duration: 0.18)) {
-                                isContextMenuVisible = false
-                            }
+                            dismissCardContextMenu()
                         }
+                        .gesture(cardContextMenuScrollGesture)
                         .zIndex(10)
 
-                    if let card = expandedCard {
+                    if let card = contextMenuCard {
                         ContextActionMenu(actions: [
                             ContextAction(title: "分享名片") {},
                             ContextAction(title: "保存为图片") {
@@ -124,7 +130,15 @@ struct CardHolderView: View {
                             }
                         ])
                         .frame(width: 250)
-                        .position(x: proxy.size.width / 2, y: 654)
+                        .position(
+                            x: proxy.size.width / 2,
+                            y: cardContextMenuCenterY
+                        )
+                        .scaleEffect(
+                            1 - contextMenuDragDismissProgress * 0.04,
+                            anchor: .top
+                        )
+                        .opacity(1 - contextMenuDragDismissProgress)
                         .transition(.cardaContextActionMenu)
                         .zIndex(11)
                     }
@@ -186,7 +200,11 @@ struct CardHolderView: View {
             .coordinateSpace(name: Self.holderCoordinateSpaceName)
         }
         .sheet(isPresented: $isAddSheetPresented) {
-            AddCardSheet(accountAvatarImageData: accountAvatarImageData) {
+            AddCardSheet(
+                accountAvatarImageData: accountAvatarImageData,
+                accountName: accountName,
+                accountEmail: accountEmail
+            ) {
                 isAddSheetPresented = false
                 editorMode = .create
             }
@@ -296,7 +314,12 @@ struct CardHolderView: View {
                     .frame(width: 370, height: 41, alignment: .leading)
                     .offset(x: 16, y: 62)
 
-                TemporaryHolderAvatar()
+                UserAvatarButton(
+                    imageData: accountAvatarImageData,
+                    isLoggedIn: isAccountLoggedIn
+                ) {
+                    isAddSheetPresented = true
+                }
                     .offset(x: 342, y: 62)
             }
 
@@ -427,6 +450,12 @@ struct CardHolderView: View {
                 }
                 .offset(y: holderContentTop)
                 .scrollIndicators(.hidden)
+                .scrollPosition($groupedScrollPosition)
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    geometry.contentOffset.y + geometry.contentInsets.top
+                } action: { _, offsetY in
+                    groupedScrollOffsetY = max(0, offsetY)
+                }
 
                 holderTopCardGradientMask
             }
@@ -539,89 +568,83 @@ struct CardHolderView: View {
         .allowsHitTesting(false)
     }
 
-    @ViewBuilder
     private func cardRowOrExpanded(_ card: BusinessCard) -> some View {
-        if expandedCardID == card.id {
-            SwipeToDeleteCardContainer(
-                cardID: card.id,
-                height: CardLayoutCalculator.height(for: card.renderData),
-                revealedCardID: $revealedDeleteCardID,
-                onDelete: {
-                    requestDelete(card)
+        let isExpanded = expandedCardID == card.id
+        let cardHeight = isExpanded
+            ? CardLayoutCalculator.height(for: card.renderData)
+            : 60
+
+        let expandCard = {
+            withAnimation(CardExpansionMotion.shapeAnimation) {
+                expandedCardID = card.id
+                revealedDeleteCardID = nil
+                isContextMenuVisible = false
+                listContextMenuListID = nil
+            }
+        }
+
+        let toggleCard = {
+            if isExpanded {
+                withAnimation(CardExpansionMotion.shapeAnimation) {
+                    expandedCardID = nil
+                    revealedDeleteCardID = nil
+                    isContextMenuVisible = false
+                    listContextMenuListID = nil
                 }
-            ) {
+            } else {
+                expandCard()
+            }
+        }
+
+        return SwipeToDeleteCardContainer(
+            cardID: card.id,
+            height: cardHeight,
+            revealedCardID: $revealedDeleteCardID,
+            onDelete: {
+                requestDelete(card)
+            }
+        ) {
+            ZStack(alignment: .topLeading) {
                 BusinessCardView(
                     data: card.renderData,
                     width: CardaTheme.cardWidth,
-                    onInfoAction: handleCardInfoAction
+                    onInfoAction: handleCardInfoAction,
+                    isExpanded: isExpanded
                 )
-                .matchedGeometryEffect(id: "holder-card-\(card.id)", in: cardExpansionNamespace)
-            }
-                .simultaneousGesture(
-                LongPressGesture(minimumDuration: 0.45)
-                    .onEnded { _ in
-                        withAnimation(.snappy(duration: 0.24)) {
-                            isContextMenuVisible = true
-                            listContextMenuListID = nil
+
+                if mode == .list && !isExpanded {
+                    ListCardDragSource(
+                        data: card.renderData,
+                        onTap: expandCard,
+                        onDragBegan: {
+                            draggingListCardID = card.id
+                            collapseSourceListIfNeeded(for: card)
+                        },
+                        onDragEnded: {
+                            finishListDragIfStillActive(cardID: card.id)
                         }
-                    }
-            )
-            .onTapGesture {
-                withAnimation(.snappy(duration: 0.32)) {
-                    expandedCardID = nil
-                    isContextMenuVisible = false
-                    listContextMenuListID = nil
+                    )
+                    .frame(width: CardaTheme.cardWidth, height: 60)
                 }
             }
-            .frame(width: CardaTheme.canvasWidth, alignment: .center)
-        } else {
-            let expandCard = {
-                withAnimation(.snappy(duration: 0.36)) {
-                    expandedCardID = card.id
-                    isContextMenuVisible = false
-                    listContextMenuListID = nil
-                }
-            }
-
-            if mode == .list {
-                SwipeToDeleteCardContainer(
-                    cardID: card.id,
-                    height: 60,
-                    revealedCardID: $revealedDeleteCardID
-                ) {
-                    requestDelete(card)
-                } content: {
-                    ZStack {
-                        CollapsedCardRow(data: card.renderData, namespace: cardExpansionNamespace)
-
-                        ListCardDragSource(
-                            data: card.renderData,
-                            onTap: expandCard,
-                            onDragBegan: {
-                                draggingListCardID = card.id
-                                collapseSourceListIfNeeded(for: card)
-                            },
-                            onDragEnded: {
-                                finishListDragIfStillActive(cardID: card.id)
-                            }
-                        )
-                        .frame(width: CardaTheme.cardWidth, height: 60)
-                    }
-                }
-                    .frame(width: CardaTheme.canvasWidth, alignment: .center)
-            } else {
-                SwipeToDeleteCardContainer(
-                    cardID: card.id,
-                    height: 60,
-                    revealedCardID: $revealedDeleteCardID
-                ) {
-                    requestDelete(card)
-                } content: {
-                    CollapsedCardRow(data: card.renderData, namespace: cardExpansionNamespace)
-                }
-                    .onTapGesture(perform: expandCard)
-                    .frame(width: CardaTheme.canvasWidth, alignment: .center)
-            }
+        }
+        .onTapGesture {
+            guard mode != .list || isExpanded else { return }
+            toggleCard()
+        }
+        .frame(
+            width: CardaTheme.canvasWidth,
+            height: cardHeight,
+            alignment: .top
+        )
+        .simultaneousGesture(
+            cardContextMenuLongPress(for: card),
+            isEnabled: isExpanded
+        )
+        .onGeometryChange(for: CGRect.self) { geometry in
+            geometry.frame(in: .named(Self.holderCoordinateSpaceName))
+        } action: { _, frame in
+            cardFrames[card.id] = frame
         }
     }
 
@@ -814,9 +837,20 @@ struct CardHolderView: View {
             .foregroundStyle(CardaTheme.formSecondaryText)
     }
 
-    private var expandedCard: BusinessCard? {
-        guard let expandedCardID else { return nil }
-        return cards.first { $0.id == expandedCardID }
+    private var contextMenuCard: BusinessCard? {
+        guard let contextMenuCardID else { return nil }
+        return cards.first { $0.id == contextMenuCardID }
+    }
+
+    private var cardContextMenuCenterY: CGFloat {
+        guard
+            let contextMenuCardID,
+            let frame = cardFrames[contextMenuCardID]
+        else {
+            return 654
+        }
+
+        return frame.maxY + 16 + 52
     }
 
     private var contextMenuList: BusinessCardList? {
@@ -1021,6 +1055,106 @@ struct CardHolderView: View {
         title.unicodeScalars.allSatisfy { $0.isASCII }
             ? CardaTheme.sfPro(size: 15, weight: .regular)
             : CardaTheme.pingFang(size: 15, weight: .regular)
+    }
+
+    private func cardContextMenuLongPress(
+        for card: BusinessCard
+    ) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.45)
+            .onEnded { _ in
+                presentCardContextMenu(for: card)
+            }
+    }
+
+    private func presentCardContextMenu(for card: BusinessCard) {
+        withAnimation(.snappy(duration: 0.24)) {
+            contextMenuCardID = card.id
+            contextMenuDragStartOffsetY = nil
+            contextMenuDragDismissProgress = 0
+            isContextMenuVisible = true
+            listContextMenuListID = nil
+            listContextMenuRowID = nil
+        }
+    }
+
+    private var cardContextMenuScrollGesture: some Gesture {
+        DragGesture(minimumDistance: 6, coordinateSpace: .local)
+            .onChanged { value in
+                guard abs(value.translation.height) > abs(value.translation.width) else {
+                    return
+                }
+
+                let startOffset = contextMenuDragStartOffsetY
+                    ?? currentCardContextMenuScrollOffsetY
+                if contextMenuDragStartOffsetY == nil {
+                    contextMenuDragStartOffsetY = startOffset
+                }
+
+                scrollCardHolder(
+                    to: max(0, startOffset - value.translation.height),
+                    animated: false
+                )
+                contextMenuDragDismissProgress = min(
+                    1,
+                    abs(value.translation.height) / 44
+                )
+            }
+            .onEnded { value in
+                guard let startOffset = contextMenuDragStartOffsetY else {
+                    return
+                }
+
+                let verticalDistance = abs(value.translation.height)
+                let isVertical = verticalDistance > abs(value.translation.width)
+                if isVertical {
+                    let predictedOffset = max(
+                        0,
+                        startOffset - value.predictedEndTranslation.height
+                    )
+                    scrollCardHolder(to: predictedOffset, animated: true)
+                }
+
+                contextMenuDragStartOffsetY = nil
+                if isVertical && verticalDistance >= 36 {
+                    dismissCardContextMenu()
+                } else {
+                    withAnimation(.snappy(duration: 0.18)) {
+                        contextMenuDragDismissProgress = 0
+                    }
+                }
+            }
+    }
+
+    private var currentCardContextMenuScrollOffsetY: CGFloat {
+        mode == .list ? listScrollOffsetY : groupedScrollOffsetY
+    }
+
+    private func scrollCardHolder(to offsetY: CGFloat, animated: Bool) {
+        let update = {
+            if mode == .list {
+                listScrollPosition.scrollTo(y: offsetY)
+            } else {
+                groupedScrollPosition.scrollTo(y: offsetY)
+            }
+        }
+
+        if animated {
+            withAnimation(.easeOut(duration: 0.22), update)
+        } else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction, update)
+        }
+    }
+
+    private func dismissCardContextMenu() {
+        withAnimation(.snappy(duration: 0.18)) {
+            contextMenuDragDismissProgress = 1
+            isContextMenuVisible = false
+        } completion: {
+            contextMenuDragDismissProgress = 0
+            contextMenuDragStartOffsetY = nil
+        }
     }
 
     private func selectMode(_ item: HolderMode) {
@@ -1331,6 +1465,9 @@ private struct ListCardDragSource: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView {
         let view = UIView()
         view.backgroundColor = .clear
+        view.layer.cornerRadius = 30
+        view.layer.cornerCurve = .circular
+        view.clipsToBounds = true
 
         let tapGesture = UITapGestureRecognizer(
             target: context.coordinator,
@@ -1385,9 +1522,35 @@ private struct ListCardDragSource: UIViewRepresentable {
             let item = UIDragItem(itemProvider: itemProvider)
             item.localObject = data.id
             item.previewProvider = { [data] in
-                UIDragPreview(view: Self.previewView(for: data))
+                UIDragPreview(
+                    view: Self.previewView(for: data),
+                    parameters: Self.previewParameters()
+                )
             }
             return [item]
+        }
+
+        func dragInteraction(
+            _ interaction: UIDragInteraction,
+            previewForLifting item: UIDragItem,
+            session: UIDragSession
+        ) -> UITargetedDragPreview? {
+            guard let sourceView = interaction.view else { return nil }
+
+            let preview = Self.previewView(for: data)
+            let target = UIDragPreviewTarget(
+                container: sourceView,
+                center: CGPoint(
+                    x: sourceView.bounds.midX,
+                    y: sourceView.bounds.midY
+                )
+            )
+
+            return UITargetedDragPreview(
+                view: preview,
+                parameters: Self.previewParameters(),
+                target: target
+            )
         }
 
         func dragInteraction(
@@ -1398,6 +1561,16 @@ private struct ListCardDragSource: UIViewRepresentable {
             onDragEnded()
         }
 
+        private static func previewParameters() -> UIDragPreviewParameters {
+            let parameters = UIDragPreviewParameters()
+            parameters.backgroundColor = .clear
+            parameters.visiblePath = UIBezierPath(
+                roundedRect: CGRect(x: 0, y: 0, width: 370, height: 60),
+                cornerRadius: 30
+            )
+            return parameters
+        }
+
         private static func previewView(for data: CardRenderData) -> UIView {
             let preview = UIView(frame: CGRect(x: 0, y: 0, width: 370, height: 60))
             preview.backgroundColor = .white
@@ -1405,20 +1578,39 @@ private struct ListCardDragSource: UIViewRepresentable {
             preview.layer.cornerCurve = .circular
             preview.clipsToBounds = true
 
-            let organizationLabel = UILabel(frame: CGRect(x: 25, y: 5.5, width: 220, height: 20))
+            let organizationLabel = UILabel(frame: CGRect(x: 25, y: 6.5, width: 220, height: 20))
             organizationLabel.text = data.displayOrganizationName
             organizationLabel.textColor = UIColor.black.withAlphaComponent(0.5)
-            organizationLabel.font = UIFont.systemFont(ofSize: 15, weight: .regular)
+            organizationLabel.font = UIFont(name: "PingFangSC-Regular", size: 15)
+                ?? .systemFont(ofSize: 15, weight: .regular)
             organizationLabel.lineBreakMode = .byTruncatingTail
 
             let nameLabel = UILabel(frame: CGRect(x: 25, y: 30.5, width: 220, height: 22))
             nameLabel.text = data.displayName
             nameLabel.textColor = .black
-            nameLabel.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
+            nameLabel.font = data.displayName.unicodeScalars.allSatisfy { $0.isASCII }
+                ? .systemFont(ofSize: 17, weight: .semibold)
+                : UIFont(name: "PingFangSC-Semibold", size: 17)
+                    ?? .systemFont(ofSize: 17, weight: .semibold)
             nameLabel.lineBreakMode = .byTruncatingTail
 
             preview.addSubview(organizationLabel)
             preview.addSubview(nameLabel)
+
+            if
+                let avatarImageData = data.avatarImageData,
+                let image = UIImage(data: avatarImageData)
+            {
+                let avatarView = UIImageView(
+                    frame: CGRect(x: 318, y: 8, width: 44, height: 44)
+                )
+                avatarView.image = image
+                avatarView.contentMode = .scaleAspectFill
+                avatarView.layer.cornerRadius = 22
+                avatarView.clipsToBounds = true
+                preview.addSubview(avatarView)
+            }
+
             return preview
         }
     }
@@ -1972,17 +2164,6 @@ private struct SwipeToDeleteCardContainer<Content: View>: View {
                 dragStartOffsetX = nil
                 isDeleteRevealDragActive = nil
             }
-    }
-}
-
-private struct TemporaryHolderAvatar: View {
-    var body: some View {
-        Image("TemporaryHolderAvatar")
-            .resizable()
-            .scaledToFill()
-            .frame(width: 44, height: 44)
-            .clipShape(Circle())
-            .accessibilityLabel("临时头像")
     }
 }
 

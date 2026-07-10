@@ -14,8 +14,13 @@ enum CardLayoutCalculator {
     static func height(for data: CardRenderData) -> CGFloat {
         let visible = data.visibleInfoFields
         let extraFields = max(0, visible.count - 3)
-        let wrappedLines = visible.reduce(0) { partial, field in
-            partial + extraInfoLineCount(for: field)
+        let wrappedLines = visible.enumerated().reduce(0) { partial, entry in
+            let isLastField = entry.offset == visible.count - 1
+            return partial + (
+                isLastField
+                    ? 0
+                    : extraInfoLineCount(for: entry.element)
+            )
         }
         return CardaTheme.baseCardHeight
             + CGFloat(extraFields) * 24
@@ -78,17 +83,32 @@ enum CardLayoutCalculator {
     #endif
 }
 
+enum CardExpansionMotion {
+    static let shapeDuration: TimeInterval = 0.36
+    static let detailsDuration: TimeInterval = 0.18
+
+    static var shapeAnimation: Animation {
+        .timingCurve(0.4, 0, 0.2, 1, duration: shapeDuration)
+    }
+
+    static func detailsAnimation(isExpanded: Bool) -> Animation {
+        .easeOut(duration: isExpanded ? detailsDuration : 0.1)
+            .delay(isExpanded ? shapeDuration : 0)
+    }
+}
+
 struct BusinessCardView: View {
     let data: CardRenderData
     var width: CGFloat = CardaTheme.cardWidth
     var onInfoAction: ((CardFieldDraft) -> Void)?
+    var isExpanded = true
 
     private var scale: CGFloat {
         width / CardaTheme.cardWidth
     }
 
     private var height: CGFloat {
-        CardLayoutCalculator.height(for: data) * scale
+        (isExpanded ? unscaledHeight : 60) * scale
     }
 
     private var unscaledHeight: CGFloat {
@@ -98,33 +118,85 @@ struct BusinessCardView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             cardBackground
-            companyGroup
-            avatar
-            identityGroup
-            infoGroup
-            actionButtonColumn
+            morphingOrganizationName
+            morphingName
+            morphingAvatar
+
+            ZStack(alignment: .topLeading) {
+                companyLogo
+                positionText
+                phoneticNameText
+                infoGroup
+                actionButtonColumn
+            }
+            .opacity(isExpanded ? 1 : 0)
+            .allowsHitTesting(isExpanded)
+            .animation(
+                CardExpansionMotion.detailsAnimation(isExpanded: isExpanded),
+                value: isExpanded
+            )
         }
-        .frame(width: width, height: height)
+        .frame(width: width, height: height, alignment: .topLeading)
+        .mask {
+            cardContentMask
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(data.displayName)
     }
 
     private var cardBackground: some View {
-        let shape = BusinessCardBodyShape(
-            cutoutTop: cardBodyCutoutTop * scale,
-            cutoutWidth: cardBodyCutoutWidth * scale,
-            cornerRadius: cardBodyCornerRadius * scale,
-            usesCompactSingleButtonCutout: actionButtonFields.count == 1
-        )
+        let shape = cardBodyShape
+        let expandedHeight = unscaledHeight * scale
 
         return shape
             .fill(Color.white, style: FillStyle(eoFill: true))
-            .overlay {
-                CardPhotoBackground(width: width, height: height)
+            .overlay(alignment: .topLeading) {
+                CardPhotoBackground(width: width, height: expandedHeight)
+                    .frame(width: width, height: height, alignment: .top)
+                    .clipped()
                     .mask {
                         shape.fill(style: FillStyle(eoFill: true))
                     }
+                    .opacity(isExpanded ? 1 : 0)
             }
+    }
+
+    private var cardBodyShape: BusinessCardBodyShape {
+        BusinessCardBodyShape(
+            cutoutTop: cardBodyCutoutTop * scale,
+            cutoutWidth: cardBodyCutoutWidth * scale,
+            collapsedCornerRadius: 30 * scale,
+            expandedCornerRadius: cardBodyCornerRadius * scale,
+            expansionProgress: isExpanded ? 1 : 0,
+            usesCompactSingleButtonCutout: actionButtonFields.count == 1
+        )
+    }
+
+    private var cardContentMask: some View {
+        ZStack(alignment: .topLeading) {
+            cardBodyShape
+                .fill(Color.white, style: FillStyle(eoFill: true))
+
+            if isExpanded {
+                VStack(spacing: 5 * scale) {
+                    ForEach(actionButtonFields, id: \.id) { _ in
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: 34 * scale, height: 34 * scale)
+                    }
+                }
+                .frame(
+                    width: 34 * scale,
+                    height: actionButtonColumnHeight * scale,
+                    alignment: .top
+                )
+                .offset(
+                    x: 336 * scale,
+                    y: actionButtonColumnTop * scale
+                )
+            }
+        }
+        .frame(width: width, height: height, alignment: .topLeading)
     }
 
     private var cardBodyCutoutWidth: CGFloat {
@@ -143,11 +215,28 @@ struct BusinessCardView: View {
     private struct BusinessCardBodyShape: Shape {
         let cutoutTop: CGFloat
         let cutoutWidth: CGFloat
-        let cornerRadius: CGFloat
+        let collapsedCornerRadius: CGFloat
+        let expandedCornerRadius: CGFloat
+        var expansionProgress: CGFloat
         let usesCompactSingleButtonCutout: Bool
 
+        var animatableData: CGFloat {
+            get { expansionProgress }
+            set { expansionProgress = newValue }
+        }
+
         func path(in rect: CGRect) -> Path {
-            guard cutoutWidth > 0, cutoutTop < rect.height else {
+            let progress = min(max(expansionProgress, 0), 1)
+            let cornerRadius = collapsedCornerRadius
+                + (expandedCornerRadius - collapsedCornerRadius) * progress
+            let animatedCutoutWidth = cutoutWidth * progress
+            let animatedCutoutTop = rect.height
+                + (cutoutTop - rect.height) * progress
+
+            guard
+                animatedCutoutWidth > 0.01,
+                animatedCutoutTop < rect.height - 0.01
+            else {
                 return Path(
                     roundedRect: rect,
                     cornerRadius: cornerRadius,
@@ -160,14 +249,14 @@ struct BusinessCardView: View {
                 rect.width / 2,
                 rect.height / 2
             )
-            let preferredSlotRadius = min(cornerRadius, cutoutWidth / 2)
+            let preferredSlotRadius = min(cornerRadius, animatedCutoutWidth / 2)
             let minCutoutHeight = preferredSlotRadius + outerRadius
-            let requestedCutoutY = min(max(0, cutoutTop), rect.height)
+            let requestedCutoutY = min(max(0, animatedCutoutTop), rect.height)
             let cutoutY = usesCompactSingleButtonCutout
                 ? requestedCutoutY
                 : min(requestedCutoutY, max(0, rect.height - minCutoutHeight))
             let cutoutHeight = rect.height - cutoutY
-            let cutoutX = rect.maxX - cutoutWidth
+            let cutoutX = rect.maxX - animatedCutoutWidth
             let slotRadius = min(
                 preferredSlotRadius,
                 cutoutHeight / 2,
@@ -275,60 +364,127 @@ struct BusinessCardView: View {
         #endif
     }
 
+    private var morphingOrganizationName: some View {
+        let expandedX: CGFloat = data.companyLogoImageData == nil ? 23 : 56
+        let expandedScale: CGFloat = 14 / 15
+
+        return Text(data.displayOrganizationName)
+            .font(CardaTheme.pingFang(size: 15 * scale, weight: .regular))
+            .foregroundStyle(Color.black.opacity(isExpanded ? 0.75 : 0.5))
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .frame(width: 220 * scale, height: 20 * scale, alignment: .leading)
+            .scaleEffect(isExpanded ? expandedScale : 1, anchor: .topLeading)
+            .frame(
+                width: (isExpanded ? 220 * expandedScale : 220) * scale,
+                height: 20 * scale,
+                alignment: .topLeading
+            )
+            .offset(
+                x: (isExpanded ? expandedX : 25) * scale,
+                y: (isExpanded ? 38 : 6.5) * scale
+            )
+    }
+
     @ViewBuilder
-    private var companyGroup: some View {
-        let logoX: CGFloat = 23
-        let top: CGFloat = 34
+    private var companyLogo: some View {
         if data.companyLogoImageData != nil {
             DataImageView(data: data.companyLogoImageData)
                 .frame(width: 28 * scale, height: 28 * scale)
                 .clipShape(RoundedRectangle(cornerRadius: 2 * scale))
-                .offset(x: logoX * scale, y: top * scale)
-            cardText(data.displayOrganizationName, size: 14, weight: .regular)
-                .frame(height: 20 * scale, alignment: .leading)
-                .offset(x: 56 * scale, y: 38 * scale)
-        } else {
-            cardText(data.displayOrganizationName, size: 14, weight: .regular)
-                .frame(height: 20 * scale, alignment: .leading)
-                .offset(x: logoX * scale, y: 38 * scale)
+                .offset(x: 23 * scale, y: 34 * scale)
         }
     }
 
     @ViewBuilder
-    private var avatar: some View {
+    private var morphingAvatar: some View {
         if data.avatarImageData != nil {
             DataImageView(data: data.avatarImageData)
                 .frame(width: 60 * scale, height: 60 * scale)
                 .clipShape(Circle())
-                .offset(x: 291 * scale, y: 23 * scale)
+                .scaleEffect(isExpanded ? 1 : 44 / 60.0, anchor: .topLeading)
+                .offset(
+                    x: (isExpanded ? 291 : 318) * scale,
+                    y: (isExpanded ? 23 : 8) * scale
+                )
         }
     }
 
-    private var identityGroup: some View {
-        ZStack(alignment: .topLeading) {
-            cardText(data.displayPosition, size: 14, weight: .regular)
-                .frame(height: 20 * scale, alignment: .leading)
-                .offset(y: 0)
+    private var morphingName: some View {
+        let expandedScale: CGFloat = 33 / 17
+        let expandedTracking = 4.8 / expandedScale
+        let collapsedWidth: CGFloat = 220
+        let expandedWidth: CGFloat = 132
 
-            Text(data.displayName)
-                .font(CardaTheme.pingFang(size: 33 * scale, weight: .semibold))
-                .tracking(4.8 * scale)
-                .foregroundStyle(Color.black)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .frame(height: 35 * scale, alignment: .leading)
-                .offset(y: 18.5 * scale)
+        return Text(data.displayName)
+            .font(collapsedNameFont)
+            .tracking((isExpanded ? expandedTracking : 0) * scale)
+            .foregroundStyle(Color.black)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .frame(
+                width: (
+                    isExpanded
+                        ? expandedWidth / expandedScale
+                        : collapsedWidth
+                ) * scale,
+                height: (
+                    isExpanded
+                        ? 35 / expandedScale
+                        : 22
+                ) * scale,
+                alignment: .leading
+            )
+            .scaleEffect(isExpanded ? expandedScale : 1, anchor: .topLeading)
+            .frame(
+                width: (isExpanded ? expandedWidth : collapsedWidth) * scale,
+                height: (isExpanded ? 35 : 22) * scale,
+                alignment: .topLeading
+            )
+            .offset(
+                x: (isExpanded ? 23 : 25) * scale,
+                y: (
+                    isExpanded
+                        ? identityGroupTop + 18.5 + expandedIdentityVerticalOffset
+                        : 30.5
+                ) * scale
+            )
+    }
 
-            Text(data.displayPhoneticName)
-                .font(CardaTheme.sfPro(size: 14 * scale, weight: .regular))
-                .foregroundStyle(CardaTheme.secondaryText)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .frame(height: 20 * scale, alignment: .leading)
-                .offset(y: 49 * scale)
-        }
-        .frame(width: 132 * scale, height: 74 * scale, alignment: .leading)
-        .offset(x: 23 * scale, y: identityGroupTop * scale)
+    private var positionText: some View {
+        cardText(data.displayPosition, size: 14, weight: .regular)
+            .frame(width: 132 * scale, height: 20 * scale, alignment: .leading)
+            .offset(
+                x: 23 * scale,
+                y: (identityGroupTop + expandedIdentityVerticalOffset) * scale
+            )
+    }
+
+    private var phoneticNameText: some View {
+        Text(data.displayPhoneticName)
+            .font(CardaTheme.sfPro(size: 14 * scale, weight: .regular))
+            .foregroundStyle(CardaTheme.secondaryText)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .frame(width: 132 * scale, height: 20 * scale, alignment: .leading)
+            .offset(
+                x: 23 * scale,
+                y: (
+                    identityGroupTop
+                        + 49
+                        + expandedIdentityVerticalOffset
+                ) * scale
+            )
+    }
+
+    private var expandedIdentityVerticalOffset: CGFloat {
+        18
+    }
+
+    private var collapsedNameFont: Font {
+        data.displayName.unicodeScalars.allSatisfy { $0.isASCII }
+            ? CardaTheme.sfPro(size: 17 * scale, weight: .semibold)
+            : CardaTheme.pingFang(size: 17 * scale, weight: .semibold)
     }
 
     private var identityGroupTop: CGFloat {
@@ -340,13 +496,17 @@ struct BusinessCardView: View {
         let fields = data.visibleInfoFields
         if !fields.isEmpty {
             VStack(alignment: .trailing, spacing: 6 * scale) {
-                ForEach(fields, id: \.id) { field in
-                    let lineCount = CardLayoutCalculator.infoLineCount(for: field)
+                ForEach(Array(fields.enumerated()), id: \.element.id) { index, field in
+                    let isLastField = index == fields.count - 1
+                    let lineCount = isLastField
+                        ? 1
+                        : CardLayoutCalculator.infoLineCount(for: field)
                     Text(field.displayValue)
                         .font(infoFont(for: field.kind, size: 14 * scale))
                         .foregroundStyle(CardaTheme.secondaryText)
                         .multilineTextAlignment(.trailing)
-                        .lineLimit(nil)
+                        .lineLimit(isLastField ? 1 : nil)
+                        .truncationMode(.tail)
                         .frame(
                             width: 185 * scale,
                             height: CGFloat(lineCount) * 20 * scale,
@@ -367,8 +527,12 @@ struct BusinessCardView: View {
         let fields = data.visibleInfoFields
         guard !fields.isEmpty else { return 0 }
 
-        let textHeight = fields.reduce(CGFloat.zero) { partial, field in
-            partial + CGFloat(CardLayoutCalculator.infoLineCount(for: field)) * 20
+        let textHeight = fields.enumerated().reduce(CGFloat.zero) { partial, entry in
+            let isLastField = entry.offset == fields.count - 1
+            let lineCount = isLastField
+                ? 1
+                : CardLayoutCalculator.infoLineCount(for: entry.element)
+            return partial + CGFloat(lineCount) * 20
         }
         let spacing = CGFloat(max(0, fields.count - 1)) * 6
         return textHeight + spacing

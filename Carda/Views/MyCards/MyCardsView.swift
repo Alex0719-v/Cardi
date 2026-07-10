@@ -79,12 +79,17 @@ private enum SimulatorExchangeAutomation {
 #endif
 
 struct MyCardsView: View {
+    fileprivate static let cardSpacing: CGFloat = 32
+    fileprivate static let pageAnimationDuration: TimeInterval = 0.18
+    fileprivate static let bottomNavigationExclusionTop: CGFloat = 779
+
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \BusinessCard.createdAt) private var allCards: [BusinessCard]
 
     let accountAvatarImageData: Data?
     let accountName: String?
     let accountEmail: String?
+    let isAccountLoggedIn: Bool
     var showsPageBackground = true
 
     @State private var selectedIndex = 0
@@ -98,6 +103,9 @@ struct MyCardsView: View {
     @State private var queuedReceivedCard: PendingReceivedCardExchange?
     @State private var delayedReceiveWorkItem: DispatchWorkItem?
     @State private var receiveScheduleID = UUID()
+    @State private var cardDragOffset: CGFloat = 0
+    @State private var isSettlingCardPage = false
+    @State private var pageIndicatorIndex = 0
     @StateObject private var exchangeCoordinator = CardExchangeCoordinator()
 
     private var myCards: [BusinessCard] {
@@ -122,6 +130,7 @@ struct MyCardsView: View {
                 ScreenHeader(
                     title: "我的名片",
                     avatarImageData: accountAvatarImageData,
+                    isAccountLoggedIn: isAccountLoggedIn,
                     avatarAction: handleAvatarTap
                 )
 
@@ -133,7 +142,10 @@ struct MyCardsView: View {
                         .position(x: proxy.size.width / 2, y: 268)
 
                     if myCards.count > 1 {
-                        PageIndicatorCapsule(count: myCards.count, selectedIndex: selectedIndex)
+                        PageIndicatorCapsule(
+                            count: myCards.count,
+                            selectedIndex: pageIndicatorIndex
+                        )
                             .position(x: proxy.size.width / 2, y: 760)
                     }
                 }
@@ -235,6 +247,11 @@ struct MyCardsView: View {
                 }
                 #endif
             }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+            .contentShape(Rectangle())
+            .simultaneousGesture(
+                cardPageSwipeGesture(cardWidth: min(370, proxy.size.width - 32))
+            )
         }
         .sheet(isPresented: $isAddSheetPresented) {
             AddCardSheet(
@@ -256,10 +273,15 @@ struct MyCardsView: View {
         }
         .onChange(of: myCards.count) { _, count in
             selectedIndex = min(selectedIndex, max(0, count - 1))
+            pageIndicatorIndex = min(pageIndicatorIndex, max(0, count - 1))
             refreshExchangeSession()
             #if DEBUG && targetEnvironment(simulator)
             runAutomaticExchangeSimulationIfNeeded()
             #endif
+        }
+        .onChange(of: selectedIndex) { _, index in
+            guard !isSettlingCardPage else { return }
+            pageIndicatorIndex = min(index, max(0, myCards.count - 1))
         }
         .onChange(of: currentCard?.id) { _, _ in
             refreshExchangeSession()
@@ -343,7 +365,8 @@ struct MyCardsView: View {
         MyCardCarousel(
             cards: myCards,
             selectedIndex: $selectedIndex,
-            width: width
+            width: width,
+            dragOffset: cardDragOffset
         )
         .simultaneousGesture(
             LongPressGesture(minimumDuration: 0.45)
@@ -358,6 +381,101 @@ struct MyCardsView: View {
                 isContextMenuVisible = false
             }
         }
+    }
+
+    private enum CardPageDirection {
+        case forward
+        case backward
+    }
+
+    private func cardPageSwipeGesture(cardWidth: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .local)
+            .onChanged { value in
+                guard canHandleCardPageSwipe(value) else { return }
+                cardDragOffset = clampedCardDragOffset(
+                    value.translation.width,
+                    cardWidth: cardWidth
+                )
+            }
+            .onEnded { value in
+                guard canHandleCardPageSwipe(value) else {
+                    resetCardDragOffset()
+                    return
+                }
+
+                let predicted = value.predictedEndTranslation.width
+                let measured = value.translation.width
+                if measured < -35 || predicted < -85 {
+                    settleCardPage(direction: .forward, cardWidth: cardWidth)
+                } else if measured > 35 || predicted > 85 {
+                    settleCardPage(direction: .backward, cardWidth: cardWidth)
+                } else {
+                    resetCardDragOffset()
+                }
+            }
+    }
+
+    private func canHandleCardPageSwipe(_ value: DragGesture.Value) -> Bool {
+        guard myCards.count > 1, !isSettlingCardPage else { return false }
+        guard !isContextMenuVisible, outgoingCardSnapshot == nil, pendingReceivedCard == nil else { return false }
+        guard value.startLocation.y < Self.bottomNavigationExclusionTop else { return false }
+        return abs(value.translation.width) >= abs(value.translation.height)
+    }
+
+    private func clampedCardDragOffset(_ translation: CGFloat, cardWidth: CGFloat) -> CGFloat {
+        let limit = cardPageStride(cardWidth: cardWidth)
+        return min(max(translation, -limit), limit)
+    }
+
+    private func cardPageStride(cardWidth: CGFloat) -> CGFloat {
+        cardWidth + Self.cardSpacing
+    }
+
+    private func settleCardPage(direction: CardPageDirection, cardWidth: CGFloat) {
+        guard !isSettlingCardPage else { return }
+        isSettlingCardPage = true
+
+        let targetOffset: CGFloat
+        let targetIndex: Int
+        switch direction {
+        case .forward:
+            targetOffset = -cardPageStride(cardWidth: cardWidth)
+            targetIndex = wrappedMyCardIndex(selectedIndex + 1)
+        case .backward:
+            targetOffset = cardPageStride(cardWidth: cardWidth)
+            targetIndex = wrappedMyCardIndex(selectedIndex - 1)
+        }
+        withAnimation(.snappy(duration: Self.pageAnimationDuration)) {
+            cardDragOffset = targetOffset
+            pageIndicatorIndex = targetIndex
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.pageAnimationDuration) {
+            switch direction {
+            case .forward:
+                selectedIndex = targetIndex
+            case .backward:
+                selectedIndex = targetIndex
+            }
+
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                cardDragOffset = 0
+            }
+            isSettlingCardPage = false
+        }
+    }
+
+    private func resetCardDragOffset() {
+        withAnimation(.snappy(duration: 0.14)) {
+            cardDragOffset = 0
+        }
+    }
+
+    private func wrappedMyCardIndex(_ index: Int) -> Int {
+        guard !myCards.isEmpty else { return 0 }
+        return (index % myCards.count + myCards.count) % myCards.count
     }
 
     private func handleAvatarTap() {
@@ -839,14 +957,10 @@ private struct ReceiveBackdropBlurRepresentable: UIViewRepresentable {
 #endif
 
 private struct MyCardCarousel: View {
-    private static let cardSpacing: CGFloat = 32
-    private static let pageAnimationDuration: TimeInterval = 0.18
-
     let cards: [BusinessCard]
     @Binding var selectedIndex: Int
     let width: CGFloat
-    @State private var dragOffset: CGFloat = 0
-    @State private var isSettlingPage = false
+    let dragOffset: CGFloat
 
     var body: some View {
         ZStack {
@@ -860,38 +974,6 @@ private struct MyCardCarousel: View {
         }
         .frame(width: CardaTheme.canvasWidth, height: carouselHeight)
         .contentShape(Rectangle())
-        .gesture(dragGesture)
-    }
-
-    private var dragGesture: some Gesture {
-        DragGesture(minimumDistance: 3)
-            .onChanged { value in
-                guard cards.count > 1, !isSettlingPage else { return }
-                dragOffset = clampedDragOffset(value.translation.width)
-            }
-            .onEnded { value in
-                guard cards.count > 1 else {
-                    dragOffset = 0
-                    return
-                }
-
-                let predicted = value.predictedEndTranslation.width
-                let measured = value.translation.width
-                if measured < -35 || predicted < -85 {
-                    settlePage(direction: .forward)
-                } else if measured > 35 || predicted > 85 {
-                    settlePage(direction: .backward)
-                } else {
-                    withAnimation(.snappy(duration: 0.14)) {
-                        dragOffset = 0
-                    }
-                }
-            }
-    }
-
-    private enum PageDirection {
-        case forward
-        case backward
     }
 
     private var visibleSlots: [Int] {
@@ -899,7 +981,7 @@ private struct MyCardCarousel: View {
     }
 
     private var pageStride: CGFloat {
-        width + Self.cardSpacing
+        width + MyCardsView.cardSpacing
     }
 
     private var carouselHeight: CGFloat {
@@ -916,37 +998,6 @@ private struct MyCardCarousel: View {
         guard !cards.isEmpty else { return 0 }
         return (index % cards.count + cards.count) % cards.count
     }
-
-    private func clampedDragOffset(_ translation: CGFloat) -> CGFloat {
-        let limit = pageStride
-        return min(max(translation, -limit), limit)
-    }
-
-    private func settlePage(direction: PageDirection) {
-        guard !isSettlingPage else { return }
-        isSettlingPage = true
-
-        let targetOffset: CGFloat = direction == .forward ? -pageStride : pageStride
-        withAnimation(.snappy(duration: Self.pageAnimationDuration)) {
-            dragOffset = targetOffset
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.pageAnimationDuration) {
-            switch direction {
-            case .forward:
-                selectedIndex = wrappedIndex(selectedIndex + 1)
-            case .backward:
-                selectedIndex = wrappedIndex(selectedIndex - 1)
-            }
-
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                dragOffset = 0
-            }
-            isSettlingPage = false
-        }
-    }
 }
 
 private struct PageIndicatorCapsule: View {
@@ -954,22 +1005,39 @@ private struct PageIndicatorCapsule: View {
     let selectedIndex: Int
 
     var body: some View {
-        HStack(spacing: 12) {
-            ForEach(0..<count, id: \.self) { index in
-                Circle()
-                    .fill(
-                        index == selectedIndex
-                            ? CardaTheme.pageIndicatorActiveDot
-                            : CardaTheme.pageIndicatorInactiveDot
-                    )
-                    .frame(width: 8, height: 8)
+        ZStack(alignment: .leading) {
+            HStack(spacing: 12) {
+                ForEach(0..<count, id: \.self) { _ in
+                    Circle()
+                        .fill(CardaTheme.pageIndicatorInactiveDot)
+                        .frame(width: 8, height: 8)
+                }
             }
+            .frame(width: capsuleWidth, height: 20)
+
+            Circle()
+                .fill(CardaTheme.pageIndicatorActiveDot)
+                .frame(width: 8, height: 8)
+                .offset(x: activeDotLeading)
+                .animation(.snappy(duration: MyCardsView.pageAnimationDuration), value: activeIndex)
         }
-        .frame(width: CGFloat(count * 20), height: 20)
+        .frame(width: capsuleWidth, height: 20)
         .background(
             Capsule()
                 .fill(CardaTheme.pageIndicatorFill)
         )
+    }
+
+    private var capsuleWidth: CGFloat {
+        CGFloat(count * 20)
+    }
+
+    private var activeIndex: Int {
+        min(max(selectedIndex, 0), max(count - 1, 0))
+    }
+
+    private var activeDotLeading: CGFloat {
+        6 + CGFloat(activeIndex) * 20
     }
 }
 

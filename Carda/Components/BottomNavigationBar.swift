@@ -27,13 +27,18 @@ struct BottomNavigationBar: View {
     @Binding var isSearchEditing: Bool
     @Binding var searchText: String
     @FocusState.Binding var searchFieldFocused: Bool
+    @Namespace private var searchBarTransitionNamespace
+    @State private var isSearchNavigationMorphing = false
+    @State private var searchNavigationMorphGeneration = 0
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            if usesWideSearchLayout {
+            if isSearchActive && !isSearchNavigationMorphing {
                 searchActiveControls
+                    .transition(.identity)
             } else {
                 morphingIdleControls
+                    .transition(.identity)
             }
         }
         .frame(width: CardaTheme.canvasWidth, height: 95, alignment: .topLeading)
@@ -75,9 +80,7 @@ struct BottomNavigationBar: View {
 
             if isSearchActive {
                 Button {
-                    withAnimation(navigationMorphAnimation) {
-                        isSearchActive = false
-                    }
+                    deactivateSearchPage()
                 } label: {
                     NavigationHitArea()
                         .frame(width: 62, height: 62)
@@ -111,6 +114,10 @@ struct BottomNavigationBar: View {
 
             FigmaGlassShape(cornerRadius: 296, interactive: true)
                 .frame(width: isSearchActive ? 279 : 62, height: 62)
+                .matchedGeometryEffect(
+                    id: "search-bar-background",
+                    in: searchBarTransitionNamespace
+                )
                 .offset(x: isSearchActive ? 103 : 319, y: 12)
                 .allowsHitTesting(false)
 
@@ -122,6 +129,10 @@ struct BottomNavigationBar: View {
                 .frame(
                     width: isSearchActive ? 20 : 23,
                     height: isSearchActive ? 20 : 23
+                )
+                .matchedGeometryEffect(
+                    id: "search-bar-glyph",
+                    in: searchBarTransitionNamespace
                 )
                 .position(x: isSearchActive ? 131 : 350, y: 43)
                 .allowsHitTesting(false)
@@ -144,10 +155,7 @@ struct BottomNavigationBar: View {
                 .accessibilityLabel("搜索")
             } else {
                 Button {
-                    withAnimation(navigationMorphAnimation) {
-                        isSearchActive = true
-                        isSearchEditing = false
-                    }
+                    activateSearchPage()
                 } label: {
                     NavigationHitArea()
                         .frame(width: 62, height: 62)
@@ -164,7 +172,7 @@ struct BottomNavigationBar: View {
         ZStack(alignment: .topLeading) {
             if !isSearchEditing && !hasSearchText {
                 Button {
-                    isSearchActive = false
+                    deactivateSearchPage()
                 } label: {
                     ZStack {
                         FigmaGlassShape(cornerRadius: 296, interactive: true)
@@ -186,6 +194,10 @@ struct BottomNavigationBar: View {
                 SearchGlyph()
                     .stroke(CardaTheme.primaryText, style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
                     .frame(width: 20, height: 20)
+                    .matchedGeometryEffect(
+                        id: "search-bar-glyph",
+                        in: searchBarTransitionNamespace
+                    )
                 TextField("", text: $searchText)
                     .focused($searchFieldFocused)
                     .font(CardaTheme.pingFang(size: 17))
@@ -193,7 +205,9 @@ struct BottomNavigationBar: View {
                     .submitLabel(.done)
                     .onSubmit {
                         searchFieldFocused = false
-                        isSearchEditing = false
+                        withAnimation(searchLiftAnimation) {
+                            isSearchEditing = false
+                        }
                     }
                     .allowsHitTesting(isSearchEditing)
                     .onTapGesture {
@@ -201,13 +215,21 @@ struct BottomNavigationBar: View {
                     }
                     .onChange(of: searchFieldFocused) { _, focused in
                         if focused && !isSearchEditing {
-                            isSearchEditing = true
+                            withAnimation(searchLiftAnimation) {
+                                isSearchEditing = true
+                            }
                         }
                     }
             }
             .padding(.horizontal, 18)
             .frame(width: usesWideSearchLayout ? 293 : 279, height: 62)
-            .background(FigmaGlassShape(cornerRadius: 296, interactive: true))
+            .background {
+                FigmaGlassShape(cornerRadius: 296, interactive: true)
+                    .matchedGeometryEffect(
+                        id: "search-bar-background",
+                        in: searchBarTransitionNamespace
+                    )
+            }
             .contentShape(RoundedRectangle(cornerRadius: 296, style: .continuous))
             .overlay {
                 if !isSearchEditing && !hasSearchText {
@@ -225,6 +247,7 @@ struct BottomNavigationBar: View {
                 }
             }
             .offset(x: usesWideSearchLayout ? 16 : 103, y: 12)
+            .animation(searchLiftAnimation, value: usesWideSearchLayout)
 
             if isSearchEditing || hasSearchText {
                 Button {
@@ -257,15 +280,74 @@ struct BottomNavigationBar: View {
         .timingCurve(0.4, 0, 0.2, 1, duration: 0.42)
     }
 
+    private var searchLiftAnimation: Animation {
+        .timingCurve(0.4, 0, 0.2, 1, duration: 0.32)
+    }
+
     private var unselectedIconAnimation: Animation {
         let animation = Animation.timingCurve(0.4, 0, 0.2, 1, duration: 0.26)
         return isSearchActive ? animation : animation.delay(0.16)
     }
 
     private func activateSearchField() {
-        isSearchEditing = true
+        withAnimation(searchLiftAnimation) {
+            isSearchEditing = true
+        }
         DispatchQueue.main.async {
             searchFieldFocused = true
+        }
+    }
+
+    private func activateSearchPage() {
+        searchNavigationMorphGeneration += 1
+        let generation = searchNavigationMorphGeneration
+        isSearchNavigationMorphing = true
+
+        withAnimation(navigationMorphAnimation) {
+            isSearchActive = true
+            isSearchEditing = false
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) {
+            guard
+                searchNavigationMorphGeneration == generation,
+                isSearchActive
+            else {
+                return
+            }
+            completeSearchNavigationMorph()
+        }
+    }
+
+    private func deactivateSearchPage() {
+        searchNavigationMorphGeneration += 1
+        let generation = searchNavigationMorphGeneration
+
+        var handoffTransaction = Transaction()
+        handoffTransaction.disablesAnimations = true
+        withTransaction(handoffTransaction) {
+            isSearchNavigationMorphing = true
+        }
+
+        DispatchQueue.main.async {
+            guard searchNavigationMorphGeneration == generation else { return }
+
+            withAnimation(navigationMorphAnimation) {
+                isSearchActive = false
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) {
+                guard searchNavigationMorphGeneration == generation else { return }
+                completeSearchNavigationMorph()
+            }
+        }
+    }
+
+    private func completeSearchNavigationMorph() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            isSearchNavigationMorphing = false
         }
     }
 

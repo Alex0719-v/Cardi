@@ -12,7 +12,6 @@ struct CardSearchView: View {
     var showsPageBackground = true
 
     @State private var expandedCardID: UUID?
-    @Namespace private var searchCardNamespace
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -48,6 +47,7 @@ struct CardSearchView: View {
                 matchesOpaqueEdgeColor: true
             )
                 .offset(y: isEditing ? 433 : 737)
+                .animation(searchLiftAnimation, value: isEditing)
                 .zIndex(2)
 
             searchHeader
@@ -114,6 +114,10 @@ struct CardSearchView: View {
         searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var searchLiftAnimation: Animation {
+        .timingCurve(0.4, 0, 0.2, 1, duration: 0.32)
+    }
+
     private var nameMatches: [BusinessCard] {
         cardHolderCards.filter {
             $0.name.localizedCaseInsensitiveContains(query)
@@ -157,27 +161,26 @@ struct CardSearchView: View {
         }
     }
 
-    @ViewBuilder
     private func searchCardRow(_ card: BusinessCard) -> some View {
-        if expandedCardID == card.id {
-            BusinessCardView(data: card.renderData, width: CardaTheme.cardWidth)
-                .matchedGeometryEffect(id: "search-card-\(card.id)", in: searchCardNamespace)
-                .onTapGesture {
-                    withAnimation(.snappy(duration: 0.32)) {
-                        expandedCardID = nil
-                    }
-                }
-                .frame(width: CardaTheme.canvasWidth, alignment: .center)
-        } else {
-            CollapsedCardRow(data: card.renderData)
-                .matchedGeometryEffect(id: "search-card-\(card.id)", in: searchCardNamespace)
-                .onTapGesture {
-                    withAnimation(.snappy(duration: 0.36)) {
-                        expandedCardID = card.id
-                    }
-                }
-                .frame(width: CardaTheme.canvasWidth, alignment: .center)
+        let isExpanded = expandedCardID == card.id
+
+        return BusinessCardView(
+            data: card.renderData,
+            width: CardaTheme.cardWidth,
+            isExpanded: isExpanded
+        )
+        .onTapGesture {
+            withAnimation(CardExpansionMotion.shapeAnimation) {
+                expandedCardID = isExpanded ? nil : card.id
+            }
         }
+        .frame(
+            width: CardaTheme.canvasWidth,
+            height: isExpanded
+                ? CardLayoutCalculator.height(for: card.renderData)
+                : 60,
+            alignment: .top
+        )
     }
 
     private func emptyState(_ text: String) -> some View {
