@@ -87,7 +87,7 @@ private enum CardHolderInteractionIsolationTests {
 Run:
 
 ```bash
-xcrun swiftc \
+xcrun swiftc -parse-as-library \
   ../CardaLogicTests/CardHolderInteractionIsolationTests.swift \
   -o /tmp/CardHolderInteractionIsolationTests
 ```
@@ -259,7 +259,7 @@ enum StableIdentityReducer {
 Run:
 
 ```bash
-xcrun swiftc \
+xcrun swiftc -parse-as-library \
   Components/CardHolderInteractionIsolation.swift \
   ../CardaLogicTests/CardHolderInteractionIsolationTests.swift \
   -o /tmp/CardHolderInteractionIsolationTests && \
@@ -560,7 +560,7 @@ private struct GroupedHeaderAnchorPreferenceKey: PreferenceKey {
 Run:
 
 ```bash
-xcrun swiftc \
+xcrun swiftc -parse-as-library \
   Components/CardHolderInteractionIsolation.swift \
   ../CardaLogicTests/CardHolderInteractionIsolationTests.swift \
   -o /tmp/CardHolderInteractionIsolationTests && \
