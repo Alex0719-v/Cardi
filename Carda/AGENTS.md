@@ -54,7 +54,7 @@
 - 默认页面背景使用 `PageBackground` / `#F9F8FB`。
 - 例外：创建/编辑名片、“我的名片”、名片夹大面积内容面板与搜索页面统一使用 `SearchBackground` / `#D8D7DB`；`MyCardsBackground` 与 `EditorBackground` 均为该 token 的别名。
 - 新版“名片夹”页面的面板轮廓仍以 Figma `10064:3390` / `10064:3656` 为准，但不再使用白色叠加 `#C3C2C8` 的 50% / 65% 复合灰，统一填充 `SearchBackground`。
-- Cardi 当前为固定浅色视觉系统，应用根视图必须使用 `.preferredColorScheme(.light)`；不得让系统深色模式把 Liquid Glass 或渐变毛玻璃切换为深灰/黑色材质配方。
+- Cardi 最低支持 iOS 17.0，且当前为固定浅色视觉系统。应用根视图必须使用 `.preferredColorScheme(.light)`；不得让系统深色模式把 Liquid Glass 或渐变毛玻璃切换为深灰/黑色材质配方。
 - `AppShellView` 根背景与页面内容动画必须分层。主页面内容继续使用 0.24 秒等时长交叉淡化：旧页面内容不透明度降低、新页面内容不透明度增加。背景不得做 opacity 渐变：“我的名片”与搜索/最近添加都对应铺满屏幕的 `SearchBackground` / `#D8D7DB` 状态；它们进入名片夹时，同一块灰色区域顶部从 y=0 向下移动到 y=126，并形变为名片夹当前列表/姓名/公司模式对应的内容面板与选中标签 Union；从名片夹返回“我的名片”或进入搜索/最近添加时沿原路径向上移动并重新铺满页面。动画下方固定显示名片夹的白色叠加 `#303136` 6% 底色。不得在整个 AppShell 上扩散隐式动画。
 
 全局字体规则：
@@ -91,7 +91,7 @@ Cardi 主要有三个页面：
 
 底部导航由左侧胶囊型导航与右侧搜索圆形按钮组成。搜索被激活时，右侧圆形按钮展开成横向搜索栏，左侧胶囊导航收缩成一个返回当前页面的按钮。
 
-底部导航材质统一使用原生 Liquid Glass，并以 Figma `10063:3134` 为轮廓与图层来源。Figma 原始三层填充为 65% 白色 Normal、`#DDDDDD` Color Burn、`#F7F7F7` Darken；按最新增强指令，当前实现将三层可见强度分别调整为 44%、48%、42%，减少乳白覆盖，让原生折射更明显；玻璃基底仍为 0.4% 黑色，阴影增强为 x=0/y=10/blur=44/spread=0/16% 黑色。Figma GLASS 原始参数为 radius=7、refraction=1、depth=16、lightAngle=315°、lightIntensity=0.8、dispersion=0、splay=0.06、cornerSmoothing=0.6；没有普通 stroke，液态玻璃描边来自 GLASS 高光折射。iOS 26 及以上必须使用不带额外 tint 的原生 `.glassEffect(.regular)`，左侧导航、搜索按钮/搜索栏与清空按钮放在同一个 `GlassEffectContainer(spacing: 0)` 中，防止进入搜索页时相邻表面因距离自动吸引、融合或形变；可点击表面继续追加 `.interactive()`，点击反馈只能由真实按压触发。其他公共玻璃按钮同样取消额外白色 tint，以扩大真实玻璃的取色与折射范围。选中 tab 保留不透明 `#EDEDED` 灰色滑块并绘制在玻璃之上。低于 iOS 26 时使用浅色 `ultraThinMaterial` 降级，并继续受应用固定浅色模式约束。
+底部导航材质统一使用原生 Liquid Glass，并以 Figma `10063:3134` 为轮廓与图层来源。Figma 原始三层填充为 65% 白色 Normal、`#DDDDDD` Color Burn、`#F7F7F7` Darken；按最新增强指令，当前实现将三层可见强度分别调整为 44%、48%、42%，减少乳白覆盖，让原生折射更明显；玻璃基底仍为 0.4% 黑色，阴影增强为 x=0/y=10/blur=44/spread=0/16% 黑色。Figma GLASS 原始参数为 radius=7、refraction=1、depth=16、lightAngle=315°、lightIntensity=0.8、dispersion=0、splay=0.06、cornerSmoothing=0.6；没有普通 stroke，液态玻璃描边来自 GLASS 高光折射。iOS 26 及以上必须使用不带额外 tint 的原生 `.glassEffect(.regular)`，左侧导航、搜索按钮/搜索栏与清空按钮放在同一个 `GlassEffectContainer(spacing: 0)` 中，防止进入搜索页时相邻表面因距离自动吸引、融合或形变；可点击表面继续追加 `.interactive()`，点击反馈只能由真实按压触发。其他公共玻璃按钮同样取消额外白色 tint，以扩大真实玻璃的取色与折射范围。选中 tab 保留不透明 `#EDEDED` 灰色滑块并绘制在玻璃之上。低于 iOS 26 时不得引用 Liquid Glass API，必须使用浅色 `ultraThinMaterial` / 毛玻璃降级，并继续受应用固定浅色模式约束。
 
 底部导航在“我的名片 / 名片夹”真正发生页面切换时必须提供克制的同步反馈：新选中的 SVG 图标先在 0.08 秒内缩小到 90% 并下移 0.8pt，再以低 bounce 弹簧放大到 104.5%、上移 0.4pt，最后回到 100%；整条底栏同期轻微压缩到 x=99.6% / y=97.8% 并下移 0.6pt，再回弹到 x=100.2% / y=100.6% 后归位。灰色选中滑块单独参考登录/注册页原生 segmented control：使用 0.24 秒、零额外回弹的 `.smooth` 位移动画，不再使用 `.snappy`；开启“减弱动态效果”时滑块立即到位。重复点击当前 tab 不触发；进入搜索态的现有 0.68 秒形变不使用这套反馈。开启“减弱动态效果”时禁用缩放回弹。
 
@@ -526,7 +526,7 @@ cardHeight = 222
 - 姓名模式与公司模式的分组索引沿用 Section 的自然滚动轨迹，并通过 Anchor Preference 在前景层绘制；吸顶由唯一自定义动态吸顶线负责，不使用系统 `pinnedViews`。
 - 分组索引及其悬顶容器背景必须透明，不得使用 `PageBackground` 色块遮挡从其后方经过的折叠名片。
 - 名片夹顶部可收起区域包括标题、右上角账户头像、列表模式操作按钮和列表/姓名/公司切换栏。三种模式统一使用二态方向交互：用户手指上推、浏览页面更下方内容时，确认约 1pt 有效纵向位移后把 `headerCollapseOffset` 直接设为 110pt；用户手指下拉、浏览页面更上方内容时直接设为 0。列表模式只有 `expandedListID` 非空时才接受向上收起顶部导航；全部列表均为收起态时，上推只允许内容正常滚动，顶部导航必须保持展开。标题区域、AppShell 灰色面板/选中 Union、白色未选中标签与 Sticky Header 模块共用这一个偏移和 0.20 秒 `cubic-bezier(0.2, 0.72, 0.18, 1)` 动画，不再按内容 offset 连续投影或在滚动结束时二次吸附。
-- 滚动方向的唯一来源必须是当前 `UIScrollView.panGestureRecognizer` 的逐帧手指 translation delta；观察器只能给原生 pan 增加 target，不得安装会与 ScrollView 竞争的新手势。`ScrollGeometry` 只记录经过 `0...maximumOffsetY` clamp 的可见内容位置，不能决定标题方向；布局变化、程序化滚动、松手后的减速和触底弹性回弹都不得改写标题状态。方向切换只重置轻量 pending 状态，禁止重新引入 `ScrollPhase`、速度/进度端点吸附、滚动/标题锚点投影、基于时间的 suppression、列表专用展开锁或在标题动画期间写回 `ScrollPosition`。
+- 滚动方向的唯一来源必须是当前 `UIScrollView.panGestureRecognizer` 的逐帧手指 translation delta；观察器只能给原生 pan 增加 target，不得安装会与 ScrollView 竞争的新手势。iOS 17 兼容的 `ScrollOffsetBridge` 只记录经过 `0...maximumOffsetY` clamp 的可见内容位置并处理程序化 offset 请求，不能决定标题方向；布局变化、程序化滚动、松手后的减速和触底弹性回弹都不得改写标题状态。方向切换只重置轻量 pending 状态，禁止重新引入 `ScrollPhase`、速度/进度端点吸附、滚动/标题锚点投影、基于时间的 suppression、列表专用展开锁或在标题动画期间写回内容 offset。
 - 名片夹快速切换列表/姓名/公司时，旧模式已经开始的原生 pan 回调与分组标题 Anchor Preference 不得写入新模式状态。实现必须以手势开始时的交互代际过滤迟到回调，并以“模式 + 标题”作为分组锚点身份进行去重和当前模式过滤。该稳定性修复不得修改既有 Figma 布局、动画曲线、时长、延迟、透明度、位移、Union 形变或滚动物理。
 - 顶部导航文字的淡出不得作为与顶部位移分离的二值 `opacity` 端点动画。必须先对同一个 `headerCollapseOffset` 展示值进行可中断插值，再按既有“收起进度前 50% 保持不透明、后 50% 线性淡出”映射实时计算文字透明度；快速反向手势结束于 offset=0 时，标题、操作按钮和三个模式标签的透明度必须同步回到 1，不能保留上一轮收起动画的透明展示值。该修复不得改变现有 0.20 秒曲线、阈值或视觉坐标。
 - 进入名片夹、从搜索或其他主页面返回名片夹、以及切换列表/姓名/公司模式时，必须无动画清除方向跟踪并把 `headerCollapseOffset` 重置为 0；新页面第一帧始终是顶部导航完整展开态，不能继承离开前的收起状态。空数据状态也必须恢复展开。

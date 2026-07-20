@@ -40,10 +40,7 @@ private enum HolderHeaderScrollDirection: Equatable {
     case expanding
 }
 
-private struct HolderScrollMetrics: Equatable {
-    let offsetY: CGFloat
-    let maximumOffsetY: CGFloat
-}
+private typealias HolderScrollMetrics = ScrollOffsetMetrics
 
 struct CardHolderView: View {
     @Environment(\.modelContext) private var modelContext
@@ -90,8 +87,8 @@ struct CardHolderView: View {
     @State private var collapsedDragSourceCardID: UUID?
     @State private var collapsedDragSourceScrollOffsetY: CGFloat?
     @State private var listScrollRequest: ListScrollRequest?
-    @State private var listScrollPosition = ScrollPosition()
-    @State private var groupedScrollPosition = ScrollPosition()
+    @State private var listScrollOffsetRequest: ScrollOffsetRequest?
+    @State private var groupedScrollOffsetRequest: ScrollOffsetRequest?
     @State private var scrollRuntime = HolderScrollRuntime()
     @State private var derivedDataCache = HolderDerivedDataCache()
     @State private var ignoreListRowGesturesUntil = Date.distantPast
@@ -668,7 +665,12 @@ struct CardHolderView: View {
                         }
                     }
                     .background {
-                        scrollPanObserver(source: .grouped)
+                        ZStack {
+                            scrollPanObserver(source: .grouped)
+                            ScrollOffsetBridge(request: $groupedScrollOffsetRequest) { metrics in
+                                handleScrollMetrics(metrics, source: .grouped)
+                            }
+                        }
                     }
                     // Mode changes animate the shared foreground headers, not stale list rows.
                     .transaction { transaction in
@@ -697,12 +699,6 @@ struct CardHolderView: View {
                 }
                 .offset(y: holderCollapsedContentTop)
                 .scrollIndicators(.hidden)
-                .scrollPosition($groupedScrollPosition)
-                .onScrollGeometryChange(for: HolderScrollMetrics.self) { geometry in
-                    holderScrollMetrics(from: geometry)
-                } action: { _, metrics in
-                    handleScrollMetrics(metrics, source: .grouped)
-                }
 
                 holderTopCardGradientMask
             }
@@ -1019,10 +1015,22 @@ struct CardHolderView: View {
             cardContextMenuLongPress(for: card),
             isEnabled: isExpanded && !isMultiSelecting
         )
-        .onGeometryChange(for: CGRect.self) { geometry in
-            geometry.frame(in: .named(Self.holderCoordinateSpaceName))
-        } action: { _, frame in
-            geometryFrameStore.cardFrames[card.id] = frame
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: CardFramePreferenceKey.self,
+                    value: [
+                        card.id: geometry.frame(
+                            in: .named(Self.holderCoordinateSpaceName)
+                        )
+                    ]
+                )
+            }
+        }
+        .onPreferenceChange(CardFramePreferenceKey.self) { frames in
+            if let frame = frames[card.id] {
+                geometryFrameStore.cardFrames[card.id] = frame
+            }
         }
     }
 
@@ -1057,7 +1065,12 @@ struct CardHolderView: View {
                     }
                 }
                 .background {
-                    scrollPanObserver(source: .list)
+                    ZStack {
+                        scrollPanObserver(source: .list)
+                        ScrollOffsetBridge(request: $listScrollOffsetRequest) { metrics in
+                            handleScrollMetrics(metrics, source: .list)
+                        }
+                    }
                 }
                 .frame(width: CardaTheme.canvasWidth, alignment: .leading)
                 .padding(.bottom, 255)
@@ -1118,12 +1131,6 @@ struct CardHolderView: View {
                 )
             )
             .scrollIndicators(.hidden)
-            .scrollPosition($listScrollPosition)
-            .onScrollGeometryChange(for: HolderScrollMetrics.self) { geometry in
-                holderScrollMetrics(from: geometry)
-            } action: { _, metrics in
-                handleScrollMetrics(metrics, source: .list)
-            }
             .frame(
                 width: CardaTheme.canvasWidth,
                 height: CardaTheme.canvasHeight,
@@ -1140,13 +1147,16 @@ struct CardHolderView: View {
                     guard listScrollRequest == request else { return }
 
                     prepareForProgrammaticScroll()
-                    withAnimation(.snappy(duration: 0.28)) {
-                        switch request.target {
-                        case .row(let rowID):
+                    switch request.target {
+                    case .row(let rowID):
+                        withAnimation(.snappy(duration: 0.28)) {
                             scrollProxy.scrollTo(rowID, anchor: .top)
-                        case .offset(let offsetY):
-                            listScrollPosition.scrollTo(y: offsetY)
                         }
+                    case .offset(let offsetY):
+                        listScrollOffsetRequest = ScrollOffsetRequest(
+                            y: offsetY,
+                            animated: !accessibilityReduceMotion
+                        )
                     }
 
                     listScrollRequest = nil
@@ -1285,10 +1295,22 @@ struct CardHolderView: View {
             }
         }
         .zIndex(1)
-        .onGeometryChange(for: CGRect.self) { geometry in
-            geometry.frame(in: .named(Self.holderCoordinateSpaceName))
-        } action: { _, frame in
-            geometryFrameStore.listRowFrames[row.id] = frame
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: ListRowFramePreferenceKey.self,
+                    value: [
+                        row.id: geometry.frame(
+                            in: .named(Self.holderCoordinateSpaceName)
+                        )
+                    ]
+                )
+            }
+        }
+        .onPreferenceChange(ListRowFramePreferenceKey.self) { frames in
+            if let frame = frames[row.id] {
+                geometryFrameStore.listRowFrames[row.id] = frame
+            }
         }
     }
 
@@ -1528,24 +1550,6 @@ struct CardHolderView: View {
             }
     }
 
-    nonisolated private func holderScrollMetrics(
-        from geometry: ScrollGeometry
-    ) -> HolderScrollMetrics {
-        let normalizedOffsetY = geometry.contentOffset.y + geometry.contentInsets.top
-        let maximumOffsetY = max(
-            0,
-            geometry.contentSize.height
-                + geometry.contentInsets.top
-                + geometry.contentInsets.bottom
-                - geometry.containerSize.height
-        )
-        let displayScale: CGFloat = 3
-        return HolderScrollMetrics(
-            offsetY: (normalizedOffsetY * displayScale).rounded() / displayScale,
-            maximumOffsetY: (maximumOffsetY * displayScale).rounded() / displayScale
-        )
-    }
-
     private var activeScrollSource: HolderScrollSource {
         mode == .list ? .list : .grouped
     }
@@ -1626,7 +1630,7 @@ struct CardHolderView: View {
 
         // One point filters subpoint finger jitter without delaying a deliberate
         // direction. After confirmation, write exactly one binary header target;
-        // content offset and ScrollPosition are never modified by this transition.
+        // content offset is never modified by this transition.
         guard scrollRuntime.pendingDistance >= 1 else { return }
 
         scrollRuntime.direction = direction
@@ -1677,20 +1681,11 @@ struct CardHolderView: View {
 
     private func scrollCardHolder(to offsetY: CGFloat, animated: Bool) {
         prepareForProgrammaticScroll()
-        let update = {
-            if mode == .list {
-                listScrollPosition.scrollTo(y: offsetY)
-            } else {
-                groupedScrollPosition.scrollTo(y: offsetY)
-            }
-        }
-
-        if animated {
-            withAnimation(.easeOut(duration: 0.22), update)
+        let request = ScrollOffsetRequest(y: offsetY, animated: animated)
+        if mode == .list {
+            listScrollOffsetRequest = request
         } else {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction, update)
+            groupedScrollOffsetRequest = request
         }
     }
 
@@ -2958,7 +2953,9 @@ private struct SwipeToDeleteCardContainer<Content: View>: View {
             content
                 .frame(width: CardaTheme.cardWidth, height: height)
                 .offset(x: 16 + offsetX)
-                .gesture(deleteRevealGesture)
+                .background {
+                    deleteRevealGestureLayer
+                }
         }
         .frame(width: CardaTheme.canvasWidth, height: height, alignment: .topLeading)
         .clipped()
@@ -3003,8 +3000,8 @@ private struct SwipeToDeleteCardContainer<Content: View>: View {
         .accessibilityLabel("删除名片")
     }
 
-    private var deleteRevealGesture: HorizontalCardSwipeGesture {
-        HorizontalCardSwipeGesture(
+    private var deleteRevealGestureLayer: some View {
+        HorizontalCardSwipeRecognizer(
             isEnabled: isSwipeEnabled,
             onChanged: { translationX in
                 if dragStartOffsetX == nil {
@@ -3037,58 +3034,86 @@ private struct SwipeToDeleteCardContainer<Content: View>: View {
 /// `DragGesture` only knows the axis after it has already joined gesture resolution,
 /// which can intermittently delay the parent `ScrollView` when a vertical drag starts
 /// on a card row.
-private struct HorizontalCardSwipeGesture: UIGestureRecognizerRepresentable {
+private struct HorizontalCardSwipeRecognizer: UIViewRepresentable {
     let isEnabled: Bool
     let onChanged: (CGFloat) -> Void
     let onEnded: (CGFloat, Bool) -> Void
 
-    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
-        Coordinator(isEnabled: isEnabled)
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            isEnabled: isEnabled,
+            onChanged: onChanged,
+            onEnded: onEnded
+        )
     }
 
-    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
-        let recognizer = UIPanGestureRecognizer()
-        recognizer.cancelsTouchesInView = false
-        recognizer.maximumNumberOfTouches = 1
-        recognizer.delegate = context.coordinator
-        recognizer.isEnabled = isEnabled
-        return recognizer
+    func makeUIView(context: Context) -> AttachmentView {
+        let view = AttachmentView()
+        view.recognizer.cancelsTouchesInView = false
+        view.recognizer.maximumNumberOfTouches = 1
+        view.recognizer.delegate = context.coordinator
+        view.recognizer.addTarget(
+            context.coordinator,
+            action: #selector(Coordinator.handle(_:))
+        )
+        view.recognizer.isEnabled = isEnabled
+        return view
     }
 
-    func updateUIGestureRecognizer(
-        _ recognizer: UIPanGestureRecognizer,
+    func updateUIView(
+        _ uiView: AttachmentView,
         context: Context
     ) {
-        context.coordinator.isEnabled = isEnabled
-        recognizer.isEnabled = isEnabled
-    }
-
-    func handleUIGestureRecognizerAction(
-        _ recognizer: UIPanGestureRecognizer,
-        context: Context
-    ) {
-        let translationX = recognizer.translation(in: recognizer.view).x
-
-        switch recognizer.state {
-        case .began, .changed:
-            onChanged(translationX)
-        case .ended:
-            let projectedTranslationX = translationX
-                + recognizer.velocity(in: recognizer.view).x * 0.2
-            onEnded(projectedTranslationX, false)
-        case .cancelled, .failed:
-            onEnded(translationX, true)
-        default:
-            break
-        }
+        context.coordinator.update(
+            isEnabled: isEnabled,
+            onChanged: onChanged,
+            onEnded: onEnded
+        )
+        uiView.recognizer.isEnabled = isEnabled
+        uiView.attachToSuperviewIfNeeded()
     }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         private let horizontalDominanceRatio: CGFloat = 1.35
         var isEnabled: Bool
+        var onChanged: (CGFloat) -> Void
+        var onEnded: (CGFloat, Bool) -> Void
 
-        init(isEnabled: Bool) {
+        init(
+            isEnabled: Bool,
+            onChanged: @escaping (CGFloat) -> Void,
+            onEnded: @escaping (CGFloat, Bool) -> Void
+        ) {
             self.isEnabled = isEnabled
+            self.onChanged = onChanged
+            self.onEnded = onEnded
+        }
+
+        func update(
+            isEnabled: Bool,
+            onChanged: @escaping (CGFloat) -> Void,
+            onEnded: @escaping (CGFloat, Bool) -> Void
+        ) {
+            self.isEnabled = isEnabled
+            self.onChanged = onChanged
+            self.onEnded = onEnded
+        }
+
+        @objc func handle(_ recognizer: UIPanGestureRecognizer) {
+            let translationX = recognizer.translation(in: recognizer.view).x
+
+            switch recognizer.state {
+            case .began, .changed:
+                onChanged(translationX)
+            case .ended:
+                let projectedTranslationX = translationX
+                    + recognizer.velocity(in: recognizer.view).x * 0.2
+                onEnded(projectedTranslationX, false)
+            case .cancelled, .failed:
+                onEnded(translationX, true)
+            default:
+                break
+            }
         }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -3098,6 +3123,36 @@ private struct HorizontalCardSwipeGesture: UIGestureRecognizerRepresentable {
             }
             let velocity = panGesture.velocity(in: panGesture.view)
             return abs(velocity.x) > abs(velocity.y) * horizontalDominanceRatio
+        }
+    }
+
+    final class AttachmentView: UIView {
+        let recognizer = UIPanGestureRecognizer()
+        private weak var attachedView: UIView?
+
+        override func didMoveToSuperview() {
+            super.didMoveToSuperview()
+            attachToSuperviewIfNeeded()
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            attachToSuperviewIfNeeded()
+        }
+
+        override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+            nil
+        }
+
+        func attachToSuperviewIfNeeded() {
+            guard attachedView !== superview else { return }
+            attachedView?.removeGestureRecognizer(recognizer)
+            attachedView = superview
+            attachedView?.addGestureRecognizer(recognizer)
+        }
+
+        deinit {
+            attachedView?.removeGestureRecognizer(recognizer)
         }
     }
 }
@@ -3145,6 +3200,28 @@ private struct GroupedHeaderAnchorPreferenceKey: PreferenceKey {
             next: nextValue(),
             id: { $0.id }
         )
+    }
+}
+
+private struct CardFramePreferenceKey: PreferenceKey {
+    static let defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(
+        value: inout [UUID: CGRect],
+        nextValue: () -> [UUID: CGRect]
+    ) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
+private struct ListRowFramePreferenceKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+
+    static func reduce(
+        value: inout [String: CGRect],
+        nextValue: () -> [String: CGRect]
+    ) {
+        value.merge(nextValue()) { _, new in new }
     }
 }
 

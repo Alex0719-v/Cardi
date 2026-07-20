@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "2650"
+   LastUpgradeVersion = "2660"
    version = "1.7">
    <BuildAction
       parallelizeBuildables = "YES"
@@ -16,7 +16,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "FACA15F42FD54A3A0083B539"
-               BuildableName = "Cardi.app"
+               BuildableName = "Cardi-Business.app"
                BlueprintName = "Cardi"
                ReferencedContainer = "container:Cardi.xcodeproj">
             </BuildableReference>
@@ -47,7 +47,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "FACA15F42FD54A3A0083B539"
-            BuildableName = "Cardi.app"
+            BuildableName = "Cardi-Business.app"
             BlueprintName = "Cardi"
             ReferencedContainer = "container:Cardi.xcodeproj">
          </BuildableReference>
@@ -80,7 +80,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "FACA15F42FD54A3A0083B539"
-            BuildableName = "Cardi.app"
+            BuildableName = "Cardi-Business.app"
             BlueprintName = "Cardi"
             ReferencedContainer = "container:Cardi.xcodeproj">
          </BuildableReference>
@@ -97,7 +97,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "FACA15F42FD54A3A0083B539"
-            BuildableName = "Cardi.app"
+            BuildableName = "Cardi-Business.app"
             BlueprintName = "Cardi"
             ReferencedContainer = "container:Cardi.xcodeproj">
          </BuildableReference>

@@ -352,6 +352,11 @@
 - 当前：登录信息卡片已接入同一账户 Sheet 内的“登录 / 注册 → 修改信息”流程；登录使用手机号+密码，注册增加确认密码，凭据存入仅限本设备的 iOS Keychain。认证后资料页支持 `PhotosPicker` 头像、昵称和邮箱，手机号只读；当前资料同步写入 `@AppStorage` 与账户目录的 `profile.json`。每个规范化手机号另有独立 `cards.json`，完整归档自己的/收到的名片和名片夹列表；退出清空、密码重登、资料回填与两类名片恢复的 UI 自动化已通过。
 - 验收：未登录不能跳过认证页；重复注册、错误密码和确认密码不一致会阻止进入资料页；资料保存后所有右上角头像入口显示同一账户头像，并与名片头像保持独立；退出只在归档成功后清空，重新使用同一手机号与密码登录后恢复资料、两类名片及列表归属。
 
+6. iOS 17 版本支持与玻璃 API 降级 `[done]`
+- 目标：将 App 最低支持版本扩展到 iOS 17.0，并确保 iOS 26+ Liquid Glass API 不进入低系统运行路径。
+- 当前：项目 `IPHONEOS_DEPLOYMENT_TARGET` 已统一为 17.0；所有 `.glassEffect` / `GlassEffectContainer` 调用均保留 `#available(iOS 26.0, *)` 分支，低于 iOS 26 时使用固定浅色 `ultraThinMaterial` / 毛玻璃降级。名片夹与编辑页中原 iOS 18+ 的 `ScrollPosition` / `ScrollGeometry` 已替换为 `ScrollOffsetBridge`，卡片 frame 记录改为 `GeometryReader + PreferenceKey`，左滑删除轴锁定改为 iOS 17 可用的 UIKit pan 附着层。
+- 验收：Debug iOS Simulator 构建通过，Release generic iOS arm64 无签名构建通过；编译输出确认目标为 iOS 17.0。
+
 ---
 
 ## 当前技术债

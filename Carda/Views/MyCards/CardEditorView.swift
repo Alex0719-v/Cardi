@@ -16,8 +16,8 @@ struct CardEditorView: View {
     @State private var draft: BusinessCardDraft
     @State private var avatarPickerItem: PhotosPickerItem?
     @State private var logoPickerItem: PhotosPickerItem?
-    @State private var editorScrollPosition = ScrollPosition()
     @State private var editorScrollOffsetY: CGFloat = 0
+    @State private var editorScrollRestoreRequest: ScrollOffsetRequest?
     @State private var focusedDynamicFieldID: UUID?
     @State private var scrollOffsetBeforeDynamicEditing: CGFloat?
     @State private var dynamicFieldScrollRequest = 0
@@ -74,14 +74,13 @@ struct CardEditorView: View {
                         .offset(x: 187, y: addFieldButtonY)
                 }
                 .frame(width: CardaTheme.canvasWidth, height: editorContentHeight, alignment: .topLeading)
+                .background {
+                    ScrollOffsetBridge(request: $editorScrollRestoreRequest) { metrics in
+                        editorScrollOffsetY = metrics.offsetY
+                    }
+                }
             }
             .scrollIndicators(.hidden)
-            .scrollPosition($editorScrollPosition)
-            .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                geometry.contentOffset.y + geometry.contentInsets.top
-            } action: { _, offsetY in
-                editorScrollOffsetY = max(0, offsetY)
-            }
             .onChange(of: focusedDynamicFieldID) { oldID, newID in
                 guard oldID != nil, newID == nil else { return }
                 restoreScrollAfterDynamicFieldEditing()
@@ -489,9 +488,10 @@ struct CardEditorView: View {
                 return
             }
 
-            withAnimation(.snappy(duration: 0.28)) {
-                editorScrollPosition.scrollTo(y: originalOffset)
-            }
+            editorScrollRestoreRequest = ScrollOffsetRequest(
+                y: originalOffset,
+                animated: !accessibilityReduceMotion
+            )
             scrollOffsetBeforeDynamicEditing = nil
         }
     }
