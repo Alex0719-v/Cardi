@@ -17,7 +17,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		FACA15F52FD54A3A0083B539 /* Cardi-business.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Cardi-business.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		FACA15F52FD54A3A0083B539 /* Cardi.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cardi.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FACA18012FD800000083B539 /* CardiUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CardiUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -78,7 +78,7 @@
 		FACA15F62FD54A3A0083B539 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				FACA15F52FD54A3A0083B539 /* Cardi-business.app */,
+				FACA15F52FD54A3A0083B539 /* Cardi.app */,
 				FACA18012FD800000083B539 /* CardiUITests.xctest */,
 			);
 			name = Products;
@@ -106,7 +106,7 @@
 			packageProductDependencies = (
 			);
 			productName = Cardi;
-			productReference = FACA15F52FD54A3A0083B539 /* Cardi-business.app */;
+			productReference = FACA15F52FD54A3A0083B539 /* Cardi.app */;
 			productType = "com.apple.product-type.application";
 		};
 		FACA18062FD800000083B539 /* CardiUITests */ = {
@@ -355,7 +355,8 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.Alex.Carda;
-				PRODUCT_NAME = "Cardi-business";
+				PRODUCT_MODULE_NAME = Cardi;
+				PRODUCT_NAME = Cardi;
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -396,7 +397,8 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.Alex.Carda;
-				PRODUCT_NAME = "Cardi-business";
+				PRODUCT_MODULE_NAME = Cardi;
+				PRODUCT_NAME = Cardi;
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
