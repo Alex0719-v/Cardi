@@ -1,6 +1,6 @@
 //
 //  BusinessCardList.swift
-//  Carda
+//  Cardi
 //
 
 import Foundation

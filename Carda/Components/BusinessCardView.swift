@@ -1,6 +1,6 @@
 //
 //  BusinessCardView.swift
-//  Carda
+//  Cardi
 //
 
 import SwiftUI
@@ -98,10 +98,17 @@ enum CardExpansionMotion {
 }
 
 struct BusinessCardView: View {
+    enum LayerMode: Equatable {
+        case complete
+        case surface
+        case foreground
+    }
+
     let data: CardRenderData
     var width: CGFloat = CardaTheme.cardWidth
     var onInfoAction: ((CardFieldDraft) -> Void)?
     var isExpanded = true
+    var layerMode: LayerMode = .complete
 
     private var scale: CGFloat {
         width / CardaTheme.cardWidth
@@ -117,24 +124,35 @@ struct BusinessCardView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            cardBackground
-            morphingOrganizationName
-            morphingName
-            morphingAvatar
-
-            ZStack(alignment: .topLeading) {
-                companyLogo
-                positionText
-                phoneticNameText
-                infoGroup
-                actionButtonColumn
+            if layerMode != .foreground {
+                cardBackground
+                actionButtonBackgroundColumn
+                    .opacity(isExpanded ? 1 : 0)
+                    .animation(
+                        CardExpansionMotion.detailsAnimation(isExpanded: isExpanded),
+                        value: isExpanded
+                    )
             }
-            .opacity(isExpanded ? 1 : 0)
-            .allowsHitTesting(isExpanded)
-            .animation(
-                CardExpansionMotion.detailsAnimation(isExpanded: isExpanded),
-                value: isExpanded
-            )
+
+            if layerMode != .surface {
+                morphingOrganizationName
+                morphingName
+                morphingAvatar
+
+                ZStack(alignment: .topLeading) {
+                    companyLogo
+                    positionText
+                    phoneticNameText
+                    infoGroup
+                    actionButtonColumn
+                }
+                .opacity(isExpanded ? 1 : 0)
+                .allowsHitTesting(isExpanded)
+                .animation(
+                    CardExpansionMotion.detailsAnimation(isExpanded: isExpanded),
+                    value: isExpanded
+                )
+            }
         }
         .frame(width: width, height: height, alignment: .topLeading)
         .mask {
@@ -151,7 +169,11 @@ struct BusinessCardView: View {
         return shape
             .fill(Color.white, style: FillStyle(eoFill: true))
             .overlay(alignment: .topLeading) {
-                CardPhotoBackground(width: width, height: expandedHeight)
+                CardPhotoBackground(
+                    template: data.backgroundTemplate,
+                    width: width,
+                    height: expandedHeight
+                )
                     .frame(width: width, height: height, alignment: .top)
                     .clipped()
                     .mask {
@@ -314,6 +336,7 @@ struct BusinessCardView: View {
     }
 
     private struct CardPhotoBackground: View {
+        let template: CardBackgroundTemplate
         let width: CGFloat
         let height: CGFloat
 
@@ -326,7 +349,7 @@ struct BusinessCardView: View {
         @ViewBuilder
         private var content: some View {
             #if canImport(UIKit)
-            if let image = Self.uiImage {
+            if let image = Self.uiImages[template] ?? Self.uiImages[.color1] {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
@@ -334,7 +357,7 @@ struct BusinessCardView: View {
                 Color.clear
             }
             #elseif canImport(AppKit)
-            if let image = Self.nsImage {
+            if let image = Self.nsImages[template] ?? Self.nsImages[.color1] {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFill()
@@ -346,21 +369,35 @@ struct BusinessCardView: View {
             #endif
         }
 
-        private static var resourceURL: URL? {
-            Bundle.main.url(forResource: "Group 42", withExtension: "png", subdirectory: "Card photo")
-                ?? Bundle.main.url(forResource: "Group 42", withExtension: "png")
+        private static func resourceURL(for template: CardBackgroundTemplate) -> URL? {
+            Bundle.main.url(
+                forResource: template.resourceName,
+                withExtension: "png",
+                subdirectory: "Card photo"
+            ) ?? Bundle.main.url(
+                forResource: template.resourceName,
+                withExtension: "png"
+            )
         }
 
         #if canImport(UIKit)
-        private static var uiImage: UIImage? {
-            guard let resourceURL else { return nil }
-            return UIImage(contentsOfFile: resourceURL.path)
-        }
+        private static let uiImages: [CardBackgroundTemplate: UIImage] =
+            Dictionary(uniqueKeysWithValues: CardBackgroundTemplate.allCases.compactMap { template in
+                guard let resourceURL = resourceURL(for: template),
+                      let image = UIImage(contentsOfFile: resourceURL.path) else {
+                    return nil
+                }
+                return (template, image)
+            })
         #elseif canImport(AppKit)
-        private static var nsImage: NSImage? {
-            guard let resourceURL else { return nil }
-            return NSImage(contentsOfFile: resourceURL.path)
-        }
+        private static let nsImages: [CardBackgroundTemplate: NSImage] =
+            Dictionary(uniqueKeysWithValues: CardBackgroundTemplate.allCases.compactMap { template in
+                guard let resourceURL = resourceURL(for: template),
+                      let image = NSImage(contentsOf: resourceURL) else {
+                    return nil
+                }
+                return (template, image)
+            })
         #endif
     }
 
@@ -548,6 +585,35 @@ struct BusinessCardView: View {
         .offset(x: 336 * scale, y: actionButtonColumnTop * scale)
     }
 
+    private var actionButtonBackgroundColumn: some View {
+        VStack(spacing: 5 * scale) {
+            ForEach(Array(actionButtonFields.enumerated()), id: \.element.id) { index, _ in
+                actionButtonBackground(row: index)
+            }
+        }
+        .frame(width: 34 * scale, height: actionButtonColumnHeight * scale, alignment: .top)
+        .offset(x: 336 * scale, y: actionButtonColumnTop * scale)
+    }
+
+    private func actionButtonBackground(row: Int) -> some View {
+        let diameter = 34 * scale
+        let imageOriginX = 336 * scale
+        let imageOriginY = (actionButtonColumnTop + CGFloat(row) * 39) * scale
+
+        return ZStack(alignment: .topLeading) {
+            Color.white
+            CardPhotoBackground(
+                template: data.backgroundTemplate,
+                width: width,
+                height: unscaledHeight * scale
+            )
+            .offset(x: -imageOriginX, y: -imageOriginY)
+        }
+        .frame(width: diameter, height: diameter, alignment: .topLeading)
+        .clipped()
+        .clipShape(Circle())
+    }
+
     private var actionButtonFields: [CardFieldDraft] {
         data.visibleInfoFields
     }
@@ -614,8 +680,9 @@ private struct CardActionButton: View {
 
     private var buttonContent: some View {
         Circle()
-            .fill(Color.white)
+            .fill(Color.clear)
             .frame(width: 34 * scale, height: 34 * scale)
+            .contentShape(Circle())
             .overlay {
                 CardFieldIconView(kind: field.kind, scale: scale)
                     .frame(width: 20 * scale, height: 20 * scale)

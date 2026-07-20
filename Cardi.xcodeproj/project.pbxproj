@@ -6,27 +6,44 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		FACA180A2FD800000083B539 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FACA15ED2FD54A3A0083B539 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FACA15F42FD54A3A0083B539;
+			remoteInfo = Cardi;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
-		FACA15F52FD54A3A0083B539 /* Carda.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Carda.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FACA15F52FD54A3A0083B539 /* Cardi-business.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Cardi-business.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		FACA18012FD800000083B539 /* CardiUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CardiUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		FACA17002FD72C000083B539 /* Exceptions for "Carda" folder in "Carda" target */ = {
+		FACA17002FD72C000083B539 /* Exceptions for "Cardi" folder in "Cardi" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = FACA15F42FD54A3A0083B539 /* Carda */;
+			target = FACA15F42FD54A3A0083B539 /* Cardi */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		FACA15F72FD54A3A0083B539 /* Carda */ = {
+		FACA15F72FD54A3A0083B539 /* Cardi */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				FACA17002FD72C000083B539 /* Exceptions for "Carda" folder in "Carda" target */,
+				FACA17002FD72C000083B539 /* Exceptions for "Cardi" folder in "Cardi" target */,
 			);
+			name = Cardi;
 			path = Carda;
+			sourceTree = "<group>";
+		};
+		FACA18022FD800000083B539 /* CardiUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = CardiUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -39,13 +56,21 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FACA18032FD800000083B539 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		FACA15EC2FD54A3A0083B539 = {
 			isa = PBXGroup;
 			children = (
-				FACA15F72FD54A3A0083B539 /* Carda */,
+				FACA15F72FD54A3A0083B539 /* Cardi */,
+				FACA18022FD800000083B539 /* CardiUITests */,
 				FACA15F62FD54A3A0083B539 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -53,7 +78,8 @@
 		FACA15F62FD54A3A0083B539 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				FACA15F52FD54A3A0083B539 /* Carda.app */,
+				FACA15F52FD54A3A0083B539 /* Cardi-business.app */,
+				FACA18012FD800000083B539 /* CardiUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -61,9 +87,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		FACA15F42FD54A3A0083B539 /* Carda */ = {
+		FACA15F42FD54A3A0083B539 /* Cardi */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = FACA16022FD54A3B0083B539 /* Build configuration list for PBXNativeTarget "Carda" */;
+			buildConfigurationList = FACA16022FD54A3B0083B539 /* Build configuration list for PBXNativeTarget "Cardi" */;
 			buildPhases = (
 				FACA15F12FD54A3A0083B539 /* Sources */,
 				FACA15F22FD54A3A0083B539 /* Frameworks */,
@@ -74,14 +100,37 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				FACA15F72FD54A3A0083B539 /* Carda */,
+				FACA15F72FD54A3A0083B539 /* Cardi */,
 			);
-			name = Carda;
+			name = Cardi;
 			packageProductDependencies = (
 			);
-			productName = Carda;
-			productReference = FACA15F52FD54A3A0083B539 /* Carda.app */;
+			productName = Cardi;
+			productReference = FACA15F52FD54A3A0083B539 /* Cardi-business.app */;
 			productType = "com.apple.product-type.application";
+		};
+		FACA18062FD800000083B539 /* CardiUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FACA18072FD800000083B539 /* Build configuration list for PBXNativeTarget "CardiUITests" */;
+			buildPhases = (
+				FACA18052FD800000083B539 /* Sources */,
+				FACA18032FD800000083B539 /* Frameworks */,
+				FACA18042FD800000083B539 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				FACA180B2FD800000083B539 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				FACA18022FD800000083B539 /* CardiUITests */,
+			);
+			name = CardiUITests;
+			packageProductDependencies = (
+			);
+			productName = CardiUITests;
+			productReference = FACA18012FD800000083B539 /* CardiUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
 
@@ -96,9 +145,13 @@
 					FACA15F42FD54A3A0083B539 = {
 						CreatedOnToolsVersion = 26.5;
 					};
+					FACA18062FD800000083B539 = {
+						CreatedOnToolsVersion = 26.5;
+						TestTargetID = FACA15F42FD54A3A0083B539;
+					};
 				};
 			};
-			buildConfigurationList = FACA15F02FD54A3A0083B539 /* Build configuration list for PBXProject "Carda" */;
+			buildConfigurationList = FACA15F02FD54A3A0083B539 /* Build configuration list for PBXProject "Cardi" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -112,13 +165,21 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				FACA15F42FD54A3A0083B539 /* Carda */,
+				FACA15F42FD54A3A0083B539 /* Cardi */,
+				FACA18062FD800000083B539 /* CardiUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		FACA15F32FD54A3A0083B539 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FACA18042FD800000083B539 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -135,7 +196,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FACA18052FD800000083B539 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		FACA180B2FD800000083B539 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FACA15F42FD54A3A0083B539 /* Cardi */;
+			targetProxy = FACA180A2FD800000083B539 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		FACA16002FD54A3B0083B539 /* Debug */ = {
@@ -259,12 +335,13 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 3MV65M953M;
+				DEVELOPMENT_TEAM = JA956N353J;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Carda/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Cardi;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -276,9 +353,9 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
-				MARKETING_VERSION = 0.6.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.Alex.Carda;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "Cardi-business";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -299,12 +376,13 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 3MV65M953M;
+				DEVELOPMENT_TEAM = JA956N353J;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Carda/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Cardi;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -316,9 +394,9 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
-				MARKETING_VERSION = 0.6.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.Alex.Carda;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "Cardi-business";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -332,10 +410,54 @@
 			};
 			name = Release;
 		};
+		FACA18082FD800000083B539 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3MV65M953M;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.Alex.CardiUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = Cardi;
+			};
+			name = Debug;
+		};
+		FACA18092FD800000083B539 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3MV65M953M;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.Alex.CardiUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = Cardi;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		FACA15F02FD54A3A0083B539 /* Build configuration list for PBXProject "Carda" */ = {
+		FACA15F02FD54A3A0083B539 /* Build configuration list for PBXProject "Cardi" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				FACA16002FD54A3B0083B539 /* Debug */,
@@ -344,11 +466,20 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		FACA16022FD54A3B0083B539 /* Build configuration list for PBXNativeTarget "Carda" */ = {
+		FACA16022FD54A3B0083B539 /* Build configuration list for PBXNativeTarget "Cardi" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				FACA16032FD54A3B0083B539 /* Debug */,
 				FACA16042FD54A3B0083B539 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FACA18072FD800000083B539 /* Build configuration list for PBXNativeTarget "CardiUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FACA18082FD800000083B539 /* Debug */,
+				FACA18092FD800000083B539 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

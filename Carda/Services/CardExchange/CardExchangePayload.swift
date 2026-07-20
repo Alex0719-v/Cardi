@@ -1,6 +1,6 @@
 //
 //  CardExchangePayload.swift
-//  Carda
+//  Cardi
 //
 
 import Foundation
@@ -33,6 +33,7 @@ struct CardExchangePayload: Codable, Hashable {
     var phoneticName: String
     var position: String
     var organizationName: String
+    var backgroundTemplateRaw: String?
     var avatarImageData: Data?
     var companyLogoImageData: Data?
     var fields: [CardExchangeFieldPayload]
@@ -44,6 +45,7 @@ struct CardExchangePayload: Codable, Hashable {
         self.phoneticName = data.phoneticName
         self.position = data.position
         self.organizationName = data.organizationName
+        self.backgroundTemplateRaw = data.backgroundTemplate.rawValue
         self.avatarImageData = data.avatarImageData
         self.companyLogoImageData = data.companyLogoImageData
         self.fields = data.fields
@@ -56,6 +58,26 @@ struct CardExchangePayload: Codable, Hashable {
         return trimmed.isEmpty ? "对方" : trimmed
     }
 
+    var isValidForExchange: Bool {
+        let maximumImageBytes = 6 * 1_024 * 1_024
+        guard
+            name.count <= 256,
+            phoneticName.count <= 256,
+            position.count <= 256,
+            organizationName.count <= 512,
+            fields.count <= 32,
+            backgroundTemplateRaw?.count ?? 0 <= 64,
+            avatarImageData?.count ?? 0 <= maximumImageBytes,
+            companyLogoImageData?.count ?? 0 <= maximumImageBytes
+        else {
+            return false
+        }
+
+        return fields.allSatisfy { field in
+            field.value.count <= 2_048 && (0..<32).contains(field.sortOrder)
+        }
+    }
+
     @MainActor
     func receivedBusinessCard() -> BusinessCard {
         let now = Date()
@@ -66,6 +88,9 @@ struct CardExchangePayload: Codable, Hashable {
             phoneticName: phoneticName,
             position: position,
             organizationName: organizationName,
+            backgroundTemplate: CardBackgroundTemplate(
+                rawValue: backgroundTemplateRaw ?? ""
+            ) ?? .color1,
             avatarImageData: avatarImageData,
             companyLogoImageData: companyLogoImageData,
             fields: fields.map(\.cardInfoField),

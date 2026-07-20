@@ -16,9 +16,23 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "FACA15F42FD54A3A0083B539"
-               BuildableName = "Carda.app"
-               BlueprintName = "Carda"
-               ReferencedContainer = "container:Carda.xcodeproj">
+               BuildableName = "Cardi-business.app"
+               BlueprintName = "Cardi"
+               ReferencedContainer = "container:Cardi.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "FACA18062FD800000083B539"
+               BuildableName = "CardiUITests.xctest"
+               BlueprintName = "CardiUITests"
+               ReferencedContainer = "container:Cardi.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -29,6 +43,27 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
       shouldAutocreateTestPlan = "YES">
+      <MacroExpansion>
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "FACA15F42FD54A3A0083B539"
+            BuildableName = "Cardi-business.app"
+            BlueprintName = "Cardi"
+            ReferencedContainer = "container:Cardi.xcodeproj">
+         </BuildableReference>
+      </MacroExpansion>
+      <Testables>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "FACA18062FD800000083B539"
+               BuildableName = "CardiUITests.xctest"
+               BlueprintName = "CardiUITests"
+               ReferencedContainer = "container:Cardi.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+      </Testables>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"
@@ -39,16 +74,15 @@
       ignoresPersistentStateOnLaunch = "NO"
       debugDocumentVersioning = "YES"
       debugServiceExtension = "internal"
-      allowLocationSimulation = "YES"
-      queueDebuggingEnableBacktraceRecording = "Yes">
+      allowLocationSimulation = "YES">
       <BuildableProductRunnable
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "FACA15F42FD54A3A0083B539"
-            BuildableName = "Carda.app"
-            BlueprintName = "Carda"
-            ReferencedContainer = "container:Carda.xcodeproj">
+            BuildableName = "Cardi-business.app"
+            BlueprintName = "Cardi"
+            ReferencedContainer = "container:Cardi.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -63,9 +97,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "FACA15F42FD54A3A0083B539"
-            BuildableName = "Carda.app"
-            BlueprintName = "Carda"
-            ReferencedContainer = "container:Carda.xcodeproj">
+            BuildableName = "Cardi-business.app"
+            BlueprintName = "Cardi"
+            ReferencedContainer = "container:Cardi.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

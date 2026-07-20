@@ -1,6 +1,6 @@
 //
 //  Item.swift
-//  Carda
+//  Cardi
 //
 //  Created by Alex Lyn on 2026/6/7.
 //

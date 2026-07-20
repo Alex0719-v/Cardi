@@ -1,6 +1,6 @@
 //
 //  BottomNavigationBar.swift
-//  Carda
+//  Cardi
 //
 
 import SwiftUI
@@ -22,6 +22,14 @@ enum AppSection: String, CaseIterable, Identifiable {
 }
 
 struct BottomNavigationBar: View {
+    private static let searchMorphDuration: TimeInterval = 0.68
+    private static let searchLiftDuration: TimeInterval = 0.52
+    private static let selectionSliderDuration: TimeInterval = 0.24
+    // Keep neighboring controls visually independent at rest. The interactive
+    // glass variant still supplies the native press response on actual touch.
+    private static let glassMergeSpacing: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.cardaReduceMotion) private var settingsReduceMotion
     @Binding var selectedSection: AppSection
     @Binding var isSearchActive: Bool
     @Binding var isSearchEditing: Bool
@@ -32,7 +40,15 @@ struct BottomNavigationBar: View {
     @State private var searchNavigationMorphGeneration = 0
 
     var body: some View {
+        navigationControls
+            .frame(width: CardaTheme.canvasWidth, height: 95, alignment: .topLeading)
+            .modifier(BottomNavigationSwitchFeedback(trigger: selectedSection))
+    }
+
+    private var navigationControls: some View {
         ZStack(alignment: .topLeading) {
+            liquidGlassSurfaceLayer
+
             if isSearchActive && !isSearchNavigationMorphing {
                 searchActiveControls
                     .transition(.identity)
@@ -41,16 +57,77 @@ struct BottomNavigationBar: View {
                     .transition(.identity)
             }
         }
+    }
+
+    @ViewBuilder
+    private var liquidGlassSurfaceLayer: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: Self.glassMergeSpacing) {
+                activeGlassSurfaces
+            }
+        } else {
+            activeGlassSurfaces
+        }
+    }
+
+    @ViewBuilder
+    private var activeGlassSurfaces: some View {
+        if isSearchActive && !isSearchNavigationMorphing {
+            searchActiveGlassSurfaces
+                .transition(.identity)
+        } else {
+            morphingIdleGlassSurfaces
+                .transition(.identity)
+        }
+    }
+
+    private var morphingIdleGlassSurfaces: some View {
+        ZStack(alignment: .topLeading) {
+            BottomNavigationGlassShape(cornerRadius: 296, interactive: true)
+                .frame(width: isSearchActive ? 62 : 191, height: 62)
+                .offset(x: isSearchActive ? 20.5 : 21, y: 12)
+
+            BottomNavigationGlassShape(cornerRadius: 296, interactive: true)
+                .frame(width: isSearchActive ? 279 : 62, height: 62)
+                .matchedGeometryEffect(
+                    id: "search-bar-background",
+                    in: searchBarTransitionNamespace
+                )
+                .offset(x: isSearchActive ? 103 : 319, y: 12)
+        }
+        .allowsHitTesting(false)
+        .animation(navigationMorphAnimation, value: isSearchActive)
+    }
+
+    private var searchActiveGlassSurfaces: some View {
+        ZStack(alignment: .topLeading) {
+            if !isSearchEditing && !hasSearchText {
+                BottomNavigationGlassShape(cornerRadius: 296, interactive: true)
+                    .frame(width: 62, height: 62)
+                    .offset(x: 20.5, y: 12)
+            }
+
+            BottomNavigationGlassShape(cornerRadius: 296, interactive: true)
+                .frame(width: usesWideSearchLayout ? 293 : 279, height: 62)
+                .matchedGeometryEffect(
+                    id: "search-bar-background",
+                    in: searchBarTransitionNamespace
+                )
+                .offset(x: usesWideSearchLayout ? 16 : 103, y: 12)
+                .animation(searchLiftAnimation, value: usesWideSearchLayout)
+
+            if isSearchEditing || hasSearchText {
+                BottomNavigationGlassShape(cornerRadius: 296, interactive: true)
+                    .frame(width: 61, height: 62)
+                    .offset(x: 325, y: 12)
+            }
+        }
+        .allowsHitTesting(false)
         .frame(width: CardaTheme.canvasWidth, height: 95, alignment: .topLeading)
     }
 
     private var morphingIdleControls: some View {
         ZStack(alignment: .topLeading) {
-            FigmaGlassShape(cornerRadius: 296)
-                .frame(width: isSearchActive ? 62 : 191, height: 62)
-                .offset(x: isSearchActive ? 20.5 : 21, y: 12)
-                .allowsHitTesting(false)
-
             RoundedRectangle(cornerRadius: 100, style: .continuous)
                 .fill(CardaTheme.selectedTabFill)
                 .frame(width: isSearchActive ? 54 : 98, height: 54)
@@ -61,10 +138,16 @@ struct BottomNavigationBar: View {
                     y: 16
                 )
                 .opacity(isSearchActive ? 0 : 1)
-                .animation(.snappy(duration: 0.28), value: selectedSection)
+                .animation(selectionSliderAnimation, value: selectedSection)
                 .allowsHitTesting(false)
 
             MyCardsTabIcon(isSelected: selectedSection == .myCards)
+                .modifier(
+                    TabIconSwitchFeedback(
+                        isSelected: selectedSection == .myCards,
+                        trigger: selectedSection
+                    )
+                )
                 .offset(x: isSearchActive ? 5 : 27, y: 16)
                 .opacity(
                     isSearchActive && selectedSection != .myCards ? 0 : 1
@@ -72,6 +155,12 @@ struct BottomNavigationBar: View {
                 .animation(unselectedIconAnimation, value: isSearchActive)
 
             CardHolderTabIcon(isSelected: selectedSection == .cardHolder)
+                .modifier(
+                    TabIconSwitchFeedback(
+                        isSelected: selectedSection == .cardHolder,
+                        trigger: selectedSection
+                    )
+                )
                 .offset(x: isSearchActive ? 1 : 113, y: 16)
                 .opacity(
                     isSearchActive && selectedSection != .cardHolder ? 0 : 1
@@ -111,15 +200,6 @@ struct BottomNavigationBar: View {
                 .offset(x: 113, y: 16)
                 .accessibilityLabel("名片夹")
             }
-
-            FigmaGlassShape(cornerRadius: 296, interactive: true)
-                .frame(width: isSearchActive ? 279 : 62, height: 62)
-                .matchedGeometryEffect(
-                    id: "search-bar-background",
-                    in: searchBarTransitionNamespace
-                )
-                .offset(x: isSearchActive ? 103 : 319, y: 12)
-                .allowsHitTesting(false)
 
             SearchGlyph()
                 .stroke(
@@ -175,8 +255,6 @@ struct BottomNavigationBar: View {
                     deactivateSearchPage()
                 } label: {
                     ZStack {
-                        FigmaGlassShape(cornerRadius: 296, interactive: true)
-                            .frame(width: 62, height: 62)
                         if selectedSection == .myCards {
                             MyIconSVGView(icon: .myCardsSelected)
                         } else {
@@ -223,13 +301,6 @@ struct BottomNavigationBar: View {
             }
             .padding(.horizontal, 18)
             .frame(width: usesWideSearchLayout ? 293 : 279, height: 62)
-            .background {
-                FigmaGlassShape(cornerRadius: 296, interactive: true)
-                    .matchedGeometryEffect(
-                        id: "search-bar-background",
-                        in: searchBarTransitionNamespace
-                    )
-            }
             .contentShape(RoundedRectangle(cornerRadius: 296, style: .continuous))
             .overlay {
                 if !isSearchEditing && !hasSearchText {
@@ -260,7 +331,6 @@ struct BottomNavigationBar: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .background(FigmaGlassShape(cornerRadius: 296, interactive: true))
                 .offset(x: 325, y: 12)
                 .accessibilityLabel("清空搜索")
             }
@@ -277,16 +347,21 @@ struct BottomNavigationBar: View {
     }
 
     private var navigationMorphAnimation: Animation {
-        .timingCurve(0.4, 0, 0.2, 1, duration: 0.42)
+        .timingCurve(0.2, 0.72, 0.18, 1, duration: Self.searchMorphDuration)
     }
 
     private var searchLiftAnimation: Animation {
-        .timingCurve(0.4, 0, 0.2, 1, duration: 0.32)
+        .timingCurve(0.2, 0.72, 0.18, 1, duration: Self.searchLiftDuration)
+    }
+
+    private var selectionSliderAnimation: Animation? {
+        guard !systemReduceMotion, !settingsReduceMotion else { return nil }
+        return .smooth(duration: Self.selectionSliderDuration, extraBounce: 0)
     }
 
     private var unselectedIconAnimation: Animation {
-        let animation = Animation.timingCurve(0.4, 0, 0.2, 1, duration: 0.26)
-        return isSearchActive ? animation : animation.delay(0.16)
+        let animation = Animation.timingCurve(0.2, 0.72, 0.18, 1, duration: 0.42)
+        return isSearchActive ? animation : animation.delay(0.26)
     }
 
     private func activateSearchField() {
@@ -308,7 +383,7 @@ struct BottomNavigationBar: View {
             isSearchEditing = false
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.searchMorphDuration) {
             guard
                 searchNavigationMorphGeneration == generation,
                 isSearchActive
@@ -336,7 +411,7 @@ struct BottomNavigationBar: View {
                 isSearchActive = false
             }
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.searchMorphDuration) {
                 guard searchNavigationMorphGeneration == generation else { return }
                 completeSearchNavigationMorph()
             }
@@ -360,6 +435,226 @@ struct BottomNavigationBar: View {
     }
 }
 
+private enum TabIconFeedbackPhase: CaseIterable {
+    case idle
+    case compressed
+    case expanded
+    case settled
+
+    var scale: CGFloat {
+        switch self {
+        case .compressed:
+            0.90
+        case .expanded:
+            1.045
+        case .idle, .settled:
+            1
+        }
+    }
+
+    var verticalOffset: CGFloat {
+        switch self {
+        case .compressed:
+            0.8
+        case .expanded:
+            -0.4
+        case .idle, .settled:
+            0
+        }
+    }
+
+    var animation: Animation {
+        switch self {
+        case .idle:
+            .linear(duration: 0)
+        case .compressed:
+            .easeOut(duration: 0.08)
+        case .expanded:
+            .spring(duration: 0.17, bounce: 0.28)
+        case .settled:
+            .spring(duration: 0.15, bounce: 0.10)
+        }
+    }
+}
+
+private struct TabIconSwitchFeedback: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.cardaReduceMotion) private var settingsReduceMotion
+    let isSelected: Bool
+    let trigger: AppSection
+
+    private var reduceMotion: Bool {
+        systemReduceMotion || settingsReduceMotion
+    }
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if reduceMotion {
+            content
+        } else {
+            content.phaseAnimator(TabIconFeedbackPhase.allCases, trigger: trigger) { view, phase in
+                view
+                    .scaleEffect(isSelected ? phase.scale : 1)
+                    .offset(y: isSelected ? phase.verticalOffset : 0)
+            } animation: { phase in
+                phase.animation
+            }
+        }
+    }
+}
+
+private enum BottomNavigationFeedbackPhase: CaseIterable {
+    case idle
+    case compressed
+    case expanded
+    case settled
+
+    var horizontalScale: CGFloat {
+        switch self {
+        case .compressed:
+            0.996
+        case .expanded:
+            1.002
+        case .idle, .settled:
+            1
+        }
+    }
+
+    var verticalScale: CGFloat {
+        switch self {
+        case .compressed:
+            0.978
+        case .expanded:
+            1.006
+        case .idle, .settled:
+            1
+        }
+    }
+
+    var verticalOffset: CGFloat {
+        switch self {
+        case .compressed:
+            0.6
+        case .expanded:
+            -0.2
+        case .idle, .settled:
+            0
+        }
+    }
+
+    var animation: Animation {
+        switch self {
+        case .idle:
+            .linear(duration: 0)
+        case .compressed:
+            .easeOut(duration: 0.08)
+        case .expanded:
+            .spring(duration: 0.18, bounce: 0.20)
+        case .settled:
+            .spring(duration: 0.16, bounce: 0.08)
+        }
+    }
+}
+
+private struct BottomNavigationSwitchFeedback: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.cardaReduceMotion) private var settingsReduceMotion
+    let trigger: AppSection
+
+    private var reduceMotion: Bool {
+        systemReduceMotion || settingsReduceMotion
+    }
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if reduceMotion {
+            content
+        } else {
+            content.phaseAnimator(BottomNavigationFeedbackPhase.allCases, trigger: trigger) { view, phase in
+                view
+                    .scaleEffect(
+                        x: phase.horizontalScale,
+                        y: phase.verticalScale,
+                        anchor: .center
+                    )
+                    .offset(y: phase.verticalOffset)
+            } animation: { phase in
+                phase.animation
+            }
+        }
+    }
+}
+
+private struct BottomNavigationGlassShape: View {
+    var cornerRadius: CGFloat
+    var interactive = false
+
+    var body: some View {
+        ZStack {
+            figmaFillAndShadow
+            nativeGlassEffect
+        }
+    }
+
+    private var figmaFillAndShadow: some View {
+        ZStack {
+            glassShape
+                .fill(Color.white.opacity(0.44))
+
+            glassShape
+                .fill(
+                    Color(red: 221 / 255, green: 221 / 255, blue: 221 / 255)
+                        .opacity(0.48)
+                )
+                .blendMode(.colorBurn)
+
+            glassShape
+                .fill(
+                    Color(red: 247 / 255, green: 247 / 255, blue: 247 / 255)
+                        .opacity(0.42)
+                )
+                .blendMode(.darken)
+        }
+        .clipShape(glassShape)
+        .shadow(color: .black.opacity(0.16), radius: 44, x: 0, y: 10)
+    }
+
+    @ViewBuilder
+    private var nativeGlassEffect: some View {
+        if #available(iOS 26.0, *) {
+            if interactive {
+                glassEffectBase
+                    .glassEffect(
+                        .regular.interactive(),
+                        in: .rect(cornerRadius: cornerRadius)
+                    )
+            } else {
+                glassEffectBase
+                    .glassEffect(
+                        .regular,
+                        in: .rect(cornerRadius: cornerRadius)
+                    )
+            }
+        } else {
+            glassEffectBase
+                .background(.ultraThinMaterial, in: glassShape)
+                .overlay {
+                    glassShape
+                        .stroke(Color.white.opacity(0.8), lineWidth: 0.8)
+                }
+        }
+    }
+
+    private var glassShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+    }
+
+    private var glassEffectBase: some View {
+        glassShape
+            .fill(Color.black.opacity(0.004))
+    }
+}
+
 struct FigmaGlassShape: View {
     var cornerRadius: CGFloat
     var interactive = false
@@ -369,26 +664,26 @@ struct FigmaGlassShape: View {
             if interactive {
                 glassBase
                     .glassEffect(
-                        .regular.tint(Color.white.opacity(0.28)).interactive(),
+                        .regular.interactive(),
                         in: .rect(cornerRadius: cornerRadius)
                     )
-                    .shadow(color: .black.opacity(0.12), radius: 20, x: 0, y: 8)
+                    .shadow(color: .black.opacity(0.16), radius: 26, x: 0, y: 10)
             } else {
                 glassBase
                     .glassEffect(
-                        .regular.tint(Color.white.opacity(0.28)),
+                        .regular,
                         in: .rect(cornerRadius: cornerRadius)
                     )
-                    .shadow(color: .black.opacity(0.12), radius: 20, x: 0, y: 8)
+                    .shadow(color: .black.opacity(0.16), radius: 26, x: 0, y: 10)
             }
         } else {
             glassBase
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(Color.white.opacity(0.34))
+                        .fill(Color.white.opacity(0.22))
                 )
-                .shadow(color: .black.opacity(0.12), radius: 20, x: 0, y: 8)
+                .shadow(color: .black.opacity(0.16), radius: 26, x: 0, y: 10)
         }
     }
 

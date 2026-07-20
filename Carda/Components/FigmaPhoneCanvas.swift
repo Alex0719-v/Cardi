@@ -1,6 +1,6 @@
 //
 //  FigmaPhoneCanvas.swift
-//  Carda
+//  Cardi
 //
 
 import SwiftUI

@@ -1,6 +1,6 @@
 //
 //  UserAvatarButton.swift
-//  Carda
+//  Cardi
 //
 
 import SwiftUI
@@ -11,26 +11,101 @@ struct UserAvatarButton: View {
     var action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            ZStack {
-                if isLoggedIn {
-                    Circle()
-                        .fill(Color.white.opacity(0.001))
+        let hasAvatarImage = isLoggedIn && imageData != nil
 
-                    if imageData != nil {
-                        DataImageView(data: imageData)
-                            .frame(width: 44, height: 44)
-                            .clipShape(Circle())
-                    }
-                } else {
-                    FigmaGlassShape(cornerRadius: 296, interactive: true)
+        Button(action: action) {
+            AccountAvatarGlassSurface(
+                width: 44,
+                height: 44,
+                cornerRadius: 22,
+                interactive: true
+            )
+            .opacity(hasAvatarImage ? 0 : 1)
+            .overlay {
+                if hasAvatarImage {
+                    DataImageView(data: imageData)
+                        .frame(width: 44, height: 44)
+                        .clipShape(
+                            RoundedRectangle(
+                                cornerRadius: 22,
+                                style: .circular
+                            )
+                        )
                 }
             }
-            .frame(width: 44, height: 44)
-            .contentShape(Circle())
+            .contentShape(
+                RoundedRectangle(
+                    cornerRadius: 22,
+                    style: .circular
+                )
+            )
         }
         .buttonStyle(.plain)
         .accessibilityLabel("用户头像")
+        .accessibilityValue(hasAvatarImage ? "已设置头像" : "未设置头像")
+        .accessibilityIdentifier("my-cards-account-avatar-button")
+    }
+}
+
+/// Shared native-glass surface used by the static account avatar and the
+/// card-holder avatar-to-list morph. The frame is fixed before glass sampling
+/// so overlay content can never widen the visible glass outline.
+struct AccountAvatarGlassSurface: View {
+    var width: CGFloat
+    var height: CGFloat
+    var cornerRadius: CGFloat
+    var interactive: Bool
+
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            if interactive {
+                glassBase
+                    .glassEffect(
+                        .regular.interactive(),
+                        in: RoundedRectangle(
+                            cornerRadius: cornerRadius,
+                            style: .circular
+                        )
+                    )
+                    .shadow(color: .black.opacity(0.16), radius: 26, x: 0, y: 10)
+            } else {
+                glassBase
+                    .glassEffect(
+                        .regular,
+                        in: RoundedRectangle(
+                            cornerRadius: cornerRadius,
+                            style: .circular
+                        )
+                    )
+                    .shadow(color: .black.opacity(0.16), radius: 26, x: 0, y: 10)
+            }
+        } else {
+            glassBase
+                .background(
+                    .ultraThinMaterial,
+                    in: RoundedRectangle(
+                        cornerRadius: cornerRadius,
+                        style: .circular
+                    )
+                )
+                .overlay {
+                    RoundedRectangle(
+                        cornerRadius: cornerRadius,
+                        style: .circular
+                    )
+                    .fill(Color.white.opacity(0.22))
+                }
+                .shadow(color: .black.opacity(0.16), radius: 26, x: 0, y: 10)
+        }
+    }
+
+    private var glassBase: some View {
+        RoundedRectangle(
+            cornerRadius: cornerRadius,
+            style: .circular
+        )
+        .fill(Color.white.opacity(0.01))
+        .frame(width: width, height: height)
     }
 }
 

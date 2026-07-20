@@ -1,6 +1,6 @@
 //
 //  CollapsedCardRow.swift
-//  Carda
+//  Cardi
 //
 
 import SwiftUI

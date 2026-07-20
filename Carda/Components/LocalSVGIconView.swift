@@ -1,6 +1,6 @@
 //
 //  LocalSVGIconView.swift
-//  Carda
+//  Cardi
 //
 
 import Foundation
@@ -8,6 +8,10 @@ import SwiftUI
 
 struct LocalSVGIconView: View {
     let fileName: String
+
+    static func clearCache() {
+        LocalSVGIconCache.shared.removeAll()
+    }
 
     var body: some View {
         if let svg = LocalSVGIconCache.shared.icon(named: fileName) {
@@ -45,6 +49,10 @@ private final class LocalSVGIconCache {
     static let shared = LocalSVGIconCache()
 
     private var icons: [String: ParsedSVGIcon] = [:]
+
+    func removeAll() {
+        icons.removeAll(keepingCapacity: false)
+    }
 
     func icon(named fileName: String) -> ParsedSVGIcon? {
         if let icon = icons[fileName] {

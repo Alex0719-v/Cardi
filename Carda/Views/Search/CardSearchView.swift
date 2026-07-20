@@ -1,6 +1,6 @@
 //
 //  CardSearchView.swift
-//  Carda
+//  Cardi
 //
 
 import SwiftUI
@@ -115,7 +115,7 @@ struct CardSearchView: View {
     }
 
     private var searchLiftAnimation: Animation {
-        .timingCurve(0.4, 0, 0.2, 1, duration: 0.32)
+        .timingCurve(0.2, 0.72, 0.18, 1, duration: 0.52)
     }
 
     private var nameMatches: [BusinessCard] {

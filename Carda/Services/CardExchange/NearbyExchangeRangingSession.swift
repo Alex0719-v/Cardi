@@ -1,6 +1,6 @@
 //
 //  NearbyExchangeRangingSession.swift
-//  Carda
+//  Cardi
 //
 
 import Foundation
@@ -11,7 +11,7 @@ import OSLog
 final class NearbyExchangeRangingSession: NSObject {
     let peerID: MCPeerID
 
-    var onUpdate: ((MCPeerID, Float, SIMD3<Float>?) -> Void)?
+    var onUpdate: ((MCPeerID, Float?, SIMD3<Float>?) -> Void)?
     var onRemoved: ((MCPeerID) -> Void)?
     var onInvalidated: ((MCPeerID) -> Void)?
     var onFailure: ((MCPeerID, String) -> Void)?
@@ -28,7 +28,9 @@ final class NearbyExchangeRangingSession: NSObject {
     }
 
     static var isSupported: Bool {
-        NISession.deviceCapabilities.supportsPreciseDistanceMeasurement
+        let capabilities = NISession.deviceCapabilities
+        return capabilities.supportsPreciseDistanceMeasurement
+            && capabilities.supportsDirectionMeasurement
     }
 
     func localDiscoveryTokenData() -> Data? {
@@ -60,6 +62,7 @@ final class NearbyExchangeRangingSession: NSObject {
     private func recreateSession() {
         session.delegate = nil
         session = NISession()
+        isManuallyInvalidating = false
         configureSession()
     }
 
@@ -84,7 +87,7 @@ final class NearbyExchangeRangingSession: NSObject {
 extension NearbyExchangeRangingSession: NISessionDelegate {
     func session(_ session: NISession, didUpdate nearbyObjects: [NINearbyObject]) {
         guard let object = nearbyObjects.first else { return }
-        onUpdate?(peerID, object.distance ?? .greatestFiniteMagnitude, object.direction)
+        onUpdate?(peerID, object.distance, object.direction)
     }
 
     func session(

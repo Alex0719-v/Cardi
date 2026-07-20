@@ -1,6 +1,6 @@
 //
 //  BusinessCard.swift
-//  Carda
+//  Cardi
 //
 
 import Foundation
@@ -14,6 +14,7 @@ final class BusinessCard {
     var phoneticName: String
     var position: String
     var organizationName: String
+    var backgroundTemplateRaw: String?
     @Attribute(.externalStorage) var avatarImageData: Data?
     @Attribute(.externalStorage) var companyLogoImageData: Data?
     var cardListID: UUID?
@@ -29,6 +30,7 @@ final class BusinessCard {
         phoneticName: String,
         position: String,
         organizationName: String,
+        backgroundTemplate: CardBackgroundTemplate = .color1,
         avatarImageData: Data? = nil,
         companyLogoImageData: Data? = nil,
         cardListID: UUID? = nil,
@@ -43,6 +45,7 @@ final class BusinessCard {
         self.phoneticName = phoneticName
         self.position = position
         self.organizationName = organizationName
+        self.backgroundTemplateRaw = backgroundTemplate.rawValue
         self.avatarImageData = avatarImageData
         self.companyLogoImageData = companyLogoImageData
         self.cardListID = cardListID
@@ -60,6 +63,7 @@ final class BusinessCard {
             phoneticName: draft.phoneticName,
             position: draft.position,
             organizationName: draft.organizationName,
+            backgroundTemplate: draft.backgroundTemplate,
             avatarImageData: draft.avatarImageData,
             companyLogoImageData: draft.companyLogoImageData,
             fields: draft.fields.map(CardInfoField.init(draft:))
@@ -69,6 +73,15 @@ final class BusinessCard {
     var ownerKind: CardOwnerKind {
         get { CardOwnerKind(rawValue: ownerKindRaw) ?? .mine }
         set { ownerKindRaw = newValue.rawValue }
+    }
+
+    var backgroundTemplate: CardBackgroundTemplate {
+        get {
+            CardBackgroundTemplate(rawValue: backgroundTemplateRaw ?? "") ?? .color1
+        }
+        set {
+            backgroundTemplateRaw = newValue.rawValue
+        }
     }
 
     var sortedFields: [CardInfoField] {
@@ -82,6 +95,7 @@ final class BusinessCard {
             phoneticName: phoneticName,
             position: position,
             organizationName: organizationName,
+            backgroundTemplate: backgroundTemplate,
             avatarImageData: avatarImageData,
             companyLogoImageData: companyLogoImageData,
             fields: sortedFields.map {
@@ -101,6 +115,7 @@ final class BusinessCard {
         phoneticName = draft.phoneticName
         position = draft.position
         organizationName = draft.organizationName
+        backgroundTemplate = draft.backgroundTemplate
         avatarImageData = draft.avatarImageData
         companyLogoImageData = draft.companyLogoImageData
         updatedAt = Date()

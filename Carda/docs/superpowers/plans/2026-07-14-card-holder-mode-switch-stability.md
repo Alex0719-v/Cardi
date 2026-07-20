@@ -22,8 +22,8 @@
 ### Task 1: Add failing correctness tests
 
 **Files:**
-- Create: `../CardaLogicTests/CardHolderInteractionIsolationTests.swift`
-- Modify: `../CardaUITests/CardHolderScrollStabilityUITests.swift`
+- Create: `../CardiLogicTests/CardHolderInteractionIsolationTests.swift`
+- Modify: `../CardiUITests/CardHolderScrollStabilityUITests.swift`
 
 - [ ] **Step 1: Create the standalone logic test runner before production helpers exist**
 
@@ -88,7 +88,7 @@ Run:
 
 ```bash
 xcrun swiftc -parse-as-library \
-  ../CardaLogicTests/CardHolderInteractionIsolationTests.swift \
+  ../CardiLogicTests/CardHolderInteractionIsolationTests.swift \
   -o /tmp/CardHolderInteractionIsolationTests
 ```
 
@@ -182,10 +182,10 @@ Run:
 
 ```bash
 xcodebuild test \
-  -project ../Carda.xcodeproj \
-  -scheme Carda \
+  -project ../Cardi.xcodeproj \
+  -scheme Cardi \
   -destination 'platform=iOS Simulator,id=AD68EC66-4579-421C-8916-80253E4B6A70' \
-  -only-testing:CardaUITests/CardHolderScrollStabilityUITests/testRapidModeSwitchingAndScrollingKeepsChromeHeadersAndCardsVisible
+  -only-testing:CardiUITests/CardHolderScrollStabilityUITests/testRapidModeSwitchingAndScrollingKeepsChromeHeadersAndCardsVisible
 ```
 
 Expected: the stress test may expose the intermittent visual failure. Regardless of its single-run outcome, Task 1 Step 2 is the deterministic RED gate proving the missing correctness boundary.
@@ -196,7 +196,7 @@ Expected: the stress test may expose the intermittent visual failure. Regardless
 
 **Files:**
 - Create: `Components/CardHolderInteractionIsolation.swift`
-- Test: `../CardaLogicTests/CardHolderInteractionIsolationTests.swift`
+- Test: `../CardiLogicTests/CardHolderInteractionIsolationTests.swift`
 
 - [ ] **Step 1: Add the generation gate and stable identity reducer**
 
@@ -261,7 +261,7 @@ Run:
 ```bash
 xcrun swiftc -parse-as-library \
   Components/CardHolderInteractionIsolation.swift \
-  ../CardaLogicTests/CardHolderInteractionIsolationTests.swift \
+  ../CardiLogicTests/CardHolderInteractionIsolationTests.swift \
   -o /tmp/CardHolderInteractionIsolationTests && \
   /tmp/CardHolderInteractionIsolationTests
 ```
@@ -274,7 +274,7 @@ Expected: exit 0 and `CardHolderInteractionIsolationTests: PASS`.
 
 **Files:**
 - Modify: `Views/CardHolder/CardHolderView.swift:66-97, 1370-1386, 1519-1526, 2639-2743`
-- Test: `../CardaLogicTests/CardHolderInteractionIsolationTests.swift`
+- Test: `../CardiLogicTests/CardHolderInteractionIsolationTests.swift`
 
 - [ ] **Step 1: Add a mode interaction generation state**
 
@@ -409,8 +409,8 @@ Run:
 
 ```bash
 xcodebuild build \
-  -project ../Carda.xcodeproj \
-  -scheme Carda \
+  -project ../Cardi.xcodeproj \
+  -scheme Cardi \
   -destination 'platform=iOS Simulator,id=AD68EC66-4579-421C-8916-80253E4B6A70'
 ```
 
@@ -422,7 +422,7 @@ Expected: `** BUILD SUCCEEDED **`.
 
 **Files:**
 - Modify: `Views/CardHolder/CardHolderView.swift:530-679, 2581-2618`
-- Test: `../CardaLogicTests/CardHolderInteractionIsolationTests.swift`
+- Test: `../CardiLogicTests/CardHolderInteractionIsolationTests.swift`
 
 - [ ] **Step 1: Capture the grouped mode as the anchor-tree identity source**
 
@@ -562,13 +562,13 @@ Run:
 ```bash
 xcrun swiftc -parse-as-library \
   Components/CardHolderInteractionIsolation.swift \
-  ../CardaLogicTests/CardHolderInteractionIsolationTests.swift \
+  ../CardiLogicTests/CardHolderInteractionIsolationTests.swift \
   -o /tmp/CardHolderInteractionIsolationTests && \
   /tmp/CardHolderInteractionIsolationTests
 
 xcodebuild build \
-  -project ../Carda.xcodeproj \
-  -scheme Carda \
+  -project ../Cardi.xcodeproj \
+  -scheme Cardi \
   -destination 'platform=iOS Simulator,id=AD68EC66-4579-421C-8916-80253E4B6A70'
 ```
 
@@ -581,7 +581,7 @@ Expected: logic runner prints `PASS`; build prints `** BUILD SUCCEEDED **`.
 **Files:**
 - Verify: `Views/CardHolder/CardHolderView.swift`
 - Verify: `Views/AppShellView.swift`
-- Verify: `../CardaUITests/CardHolderScrollStabilityUITests.swift`
+- Verify: `../CardiUITests/CardHolderScrollStabilityUITests.swift`
 
 - [ ] **Step 1: Run the complete CardHolder UI test class**
 
@@ -589,10 +589,10 @@ Run:
 
 ```bash
 xcodebuild test \
-  -project ../Carda.xcodeproj \
-  -scheme Carda \
+  -project ../Cardi.xcodeproj \
+  -scheme Cardi \
   -destination 'platform=iOS Simulator,id=AD68EC66-4579-421C-8916-80253E4B6A70' \
-  -only-testing:CardaUITests/CardHolderScrollStabilityUITests
+  -only-testing:CardiUITests/CardHolderScrollStabilityUITests
 ```
 
 Expected: all tests pass with zero failures, including the rapid mode-switch stress test.
@@ -615,7 +615,7 @@ Run:
 ```bash
 git diff --no-index -- \
   /tmp/CardHolderScrollStabilityUITests.before-stability-fix.swift \
-  ../CardaUITests/CardHolderScrollStabilityUITests.swift
+  ../CardiUITests/CardHolderScrollStabilityUITests.swift
 ```
 
 Expected: only the new stress test and its assertion helpers differ.
@@ -679,8 +679,8 @@ Run:
 git diff --check
 
 xcodebuild build \
-  -project ../Carda.xcodeproj \
-  -scheme Carda \
+  -project ../Cardi.xcodeproj \
+  -scheme Cardi \
   -destination 'platform=iOS Simulator,id=AD68EC66-4579-421C-8916-80253E4B6A70'
 ```
 

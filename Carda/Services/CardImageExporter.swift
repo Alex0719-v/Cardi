@@ -1,6 +1,6 @@
 //
 //  CardImageExporter.swift
-//  Carda
+//  Cardi
 //
 
 import SwiftUI

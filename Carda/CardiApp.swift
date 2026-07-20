@@ -1,6 +1,6 @@
 //
-//  CardaApp.swift
-//  Carda
+//  CardiApp.swift
+//  Cardi
 //
 //  Created by Alex Lyn on 2026/6/7.
 //
@@ -9,7 +9,7 @@ import SwiftUI
 import SwiftData
 
 @main
-struct CardaApp: App {
+struct CardiApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             BusinessCard.self,

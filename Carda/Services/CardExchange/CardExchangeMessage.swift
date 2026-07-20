@@ -1,48 +1,75 @@
 //
 //  CardExchangeMessage.swift
-//  Carda
+//  Cardi
 //
 
 import Foundation
 
 struct CardExchangeMessage: Codable {
     enum Kind: String, Codable {
+        case hello
         case nearbyToken
-        case proximityConfirmed
+        case throwIntent
         case card
-        case ack
+        case persistedAck
+        case rejected
         case error
     }
 
+    var protocolVersion = 2
     var kind: Kind
     var exchangeID: UUID?
     var nearbyTokenData: Data?
     var card: CardExchangePayload?
     var cardID: UUID?
+    var intentCreatedAt: Date?
+    var transferMode: CardExchangeTransferMode?
     var message: String?
 
     static func nearbyToken(_ data: Data) -> CardExchangeMessage {
         CardExchangeMessage(kind: .nearbyToken, nearbyTokenData: data)
     }
 
-    static func proximityConfirmed(exchangeID: UUID, cardID: UUID) -> CardExchangeMessage {
+    static func hello(displayName: String) -> CardExchangeMessage {
+        CardExchangeMessage(kind: .hello, message: displayName)
+    }
+
+    static func throwIntent(
+        exchangeID: UUID,
+        cardID: UUID,
+        createdAt: Date
+    ) -> CardExchangeMessage {
         CardExchangeMessage(
-            kind: .proximityConfirmed,
+            kind: .throwIntent,
             exchangeID: exchangeID,
-            cardID: cardID
+            cardID: cardID,
+            intentCreatedAt: createdAt
         )
     }
 
-    static func card(_ payload: CardExchangePayload, exchangeID: UUID) -> CardExchangeMessage {
+    static func card(
+        _ payload: CardExchangePayload,
+        exchangeID: UUID,
+        mode: CardExchangeTransferMode
+    ) -> CardExchangeMessage {
         CardExchangeMessage(
             kind: .card,
             exchangeID: exchangeID,
-            card: payload
+            card: payload,
+            transferMode: mode
         )
     }
 
-    static func ack(exchangeID: UUID) -> CardExchangeMessage {
-        CardExchangeMessage(kind: .ack, exchangeID: exchangeID)
+    static func persistedAck(exchangeID: UUID) -> CardExchangeMessage {
+        CardExchangeMessage(kind: .persistedAck, exchangeID: exchangeID)
+    }
+
+    static func rejected(exchangeID: UUID, reason: String? = nil) -> CardExchangeMessage {
+        CardExchangeMessage(
+            kind: .rejected,
+            exchangeID: exchangeID,
+            message: reason
+        )
     }
 
     static func error(_ message: String) -> CardExchangeMessage {

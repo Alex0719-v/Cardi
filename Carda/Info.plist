@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Cardi</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -11,13 +13,33 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
+	<string>Cardi</string>
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>googlechrome</string>
+		<string>googlechromes</string>
+		<string>quark</string>
+		<string>mqqbrowser</string>
+		<string>mttbrowser</string>
+		<string>microsoft-edge</string>
+		<string>microsoft-edge-http</string>
+		<string>microsoft-edge-https</string>
+		<string>ucbrowser</string>
+		<string>qqmail</string>
+		<string>mailmaster</string>
+		<string>ms-outlook</string>
+		<string>googlegmail</string>
+		<string>iosamap</string>
+		<string>baidumap</string>
+		<string>comgooglemaps</string>
+		<string>waze</string>
+	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSBonjourServices</key>
@@ -25,9 +47,11 @@
 		<string>_carda-ex._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Carda uses the local network to discover nearby Carda users for business card exchange.</string>
+	<string>Cardi uses the local network to discover nearby Cardi users for business card exchange.</string>
+	<key>NSNearbyInteractionUsageDescription</key>
+	<string>用于确认面对面递卡对象的相对距离与方向。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Carda needs permission to save business card images to your photo library.</string>
+	<string>Cardi needs permission to save business card images to your photo library.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

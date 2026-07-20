@@ -1,6 +1,6 @@
 //
 //  MultipeerExchangeTransport.swift
-//  Carda
+//  Cardi
 //
 
 import Foundation
@@ -24,7 +24,7 @@ final class MultipeerExchangeTransport: NSObject {
 
     override init() {
         let peerUUID = Self.localPeerUUID()
-        self.localPeerID = MCPeerID(displayName: "Carda-\(peerUUID.uuidString.prefix(8))")
+        self.localPeerID = MCPeerID(displayName: "Cardi-\(peerUUID.uuidString.prefix(8))")
         self.session = MCSession(
             peer: localPeerID,
             securityIdentity: nil,
@@ -34,12 +34,16 @@ final class MultipeerExchangeTransport: NSObject {
         session.delegate = self
     }
 
-    func start() {
+    var connectedPeers: [MCPeerID] {
+        session.connectedPeers
+    }
+
+    func startReceiving() {
         guard !isRunning else { return }
         isRunning = true
 
         let discoveryInfo = [
-            "app": "Carda",
+            "app": "Cardi",
             "mode": "card-exchange"
         ]
 
@@ -51,6 +55,13 @@ final class MultipeerExchangeTransport: NSObject {
         advertiser.delegate = self
         advertiser.startAdvertisingPeer()
         self.advertiser = advertiser
+    }
+
+    func startActiveDiscovery() {
+        if !isRunning {
+            startReceiving()
+        }
+        guard browser == nil else { return }
 
         let browser = MCNearbyServiceBrowser(
             peer: localPeerID,
@@ -61,20 +72,27 @@ final class MultipeerExchangeTransport: NSObject {
         self.browser = browser
     }
 
+    func stopActiveDiscovery() {
+        browser?.stopBrowsingForPeers()
+        browser?.delegate = nil
+        browser = nil
+    }
+
+    func disconnectAllPeers() {
+        invitedPeers.removeAll()
+        session.disconnect()
+    }
+
     func stop() {
-        guard isRunning else { return }
         isRunning = false
 
         advertiser?.stopAdvertisingPeer()
         advertiser?.delegate = nil
         advertiser = nil
 
-        browser?.stopBrowsingForPeers()
-        browser?.delegate = nil
-        browser = nil
+        stopActiveDiscovery()
 
-        invitedPeers.removeAll()
-        session.disconnect()
+        disconnectAllPeers()
     }
 
     func send(_ data: Data, to peer: MCPeerID) {
@@ -99,10 +117,6 @@ final class MultipeerExchangeTransport: NSObject {
         let uuid = UUID()
         UserDefaults.standard.set(uuid.uuidString, forKey: key)
         return uuid
-    }
-
-    private func shouldInvite(_ peerID: MCPeerID) -> Bool {
-        localPeerID.displayName < peerID.displayName
     }
 }
 
@@ -143,7 +157,6 @@ extension MultipeerExchangeTransport: MCNearbyServiceBrowserDelegate {
             guard
                 let self,
                 self.isRunning,
-                self.shouldInvite(peerID),
                 !self.invitedPeers.contains(peerID),
                 !self.session.connectedPeers.contains(peerID)
             else {

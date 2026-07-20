@@ -1,6 +1,6 @@
 //
 //  BusinessCardDraft.swift
-//  Carda
+//  Cardi
 //
 
 import Foundation
@@ -31,6 +31,7 @@ struct BusinessCardDraft: Identifiable, Hashable {
     var phoneticName: String
     var position: String
     var organizationName: String
+    var backgroundTemplate: CardBackgroundTemplate
     var avatarImageData: Data?
     var companyLogoImageData: Data?
     var fields: [CardFieldDraft]
@@ -42,6 +43,7 @@ struct BusinessCardDraft: Identifiable, Hashable {
         phoneticName: String = "",
         position: String = "",
         organizationName: String = "",
+        backgroundTemplate: CardBackgroundTemplate = .color1,
         avatarImageData: Data? = nil,
         companyLogoImageData: Data? = nil,
         fields: [CardFieldDraft] = BusinessCardDraft.defaultFields
@@ -52,6 +54,7 @@ struct BusinessCardDraft: Identifiable, Hashable {
         self.phoneticName = phoneticName
         self.position = position
         self.organizationName = organizationName
+        self.backgroundTemplate = backgroundTemplate
         self.avatarImageData = avatarImageData
         self.companyLogoImageData = companyLogoImageData
         self.fields = fields
@@ -64,6 +67,7 @@ struct BusinessCardDraft: Identifiable, Hashable {
         self.phoneticName = card.phoneticName
         self.position = card.position
         self.organizationName = card.organizationName
+        self.backgroundTemplate = card.backgroundTemplate
         self.avatarImageData = card.avatarImageData
         self.companyLogoImageData = card.companyLogoImageData
         self.fields = card.sortedFields.map {
@@ -92,6 +96,7 @@ struct BusinessCardDraft: Identifiable, Hashable {
             phoneticName: phoneticName,
             position: position,
             organizationName: organizationName,
+            backgroundTemplate: backgroundTemplate,
             avatarImageData: avatarImageData,
             companyLogoImageData: companyLogoImageData,
             fields: fields.sorted { $0.sortOrder < $1.sortOrder }
@@ -105,6 +110,7 @@ struct CardRenderData: Identifiable, Hashable {
     var phoneticName: String
     var position: String
     var organizationName: String
+    var backgroundTemplate: CardBackgroundTemplate = .color1
     var avatarImageData: Data?
     var companyLogoImageData: Data?
     var fields: [CardFieldDraft]

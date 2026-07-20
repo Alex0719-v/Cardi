@@ -1,6 +1,6 @@
 //
 //  DataImageView.swift
-//  Carda
+//  Cardi
 //
 
 import SwiftUI

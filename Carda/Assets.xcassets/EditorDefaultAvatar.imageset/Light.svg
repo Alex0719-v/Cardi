@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="_图层_1" data-name="图层_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" viewBox="0 0 90 99">
+  <!-- Generator: Adobe Illustrator 30.5.1, SVG Export Plug-In . SVG Version: 2.1.4 Build 3)  -->
+  <defs>
+    <style>
+      .st0 {
+        mask: url(#mask);
+      }
+
+      .st1 {
+        fill: #c4c4c4;
+      }
+
+      .st2 {
+        fill: #343539;
+      }
+
+      .st3 {
+        fill: #f3f3f3;
+      }
+    </style>
+    <mask id="mask" x="0" y="0" width="90" height="99" maskUnits="userSpaceOnUse">
+      <g id="mask0_10867_4328">
+        <circle class="st1" cx="45" cy="45" r="45"/>
+      </g>
+    </mask>
+  </defs>
+  <circle class="st3" cx="45" cy="45" r="45"/>
+  <g class="st0">
+    <g>
+      <circle class="st2" cx="45" cy="38.25" r="16.2"/>
+      <ellipse class="st2" cx="45" cy="79.2" rx="34.2" ry="19.8"/>
+    </g>
+  </g>
+</svg>

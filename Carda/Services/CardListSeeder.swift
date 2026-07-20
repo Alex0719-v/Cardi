@@ -1,6 +1,6 @@
 //
 //  CardListSeeder.swift
-//  Carda
+//  Cardi
 //
 
 import SwiftData

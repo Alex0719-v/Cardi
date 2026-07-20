@@ -1,9 +1,10 @@
 //
 //  CardHolderView.swift
-//  Carda
+//  Cardi
 //
 
 import Foundation
+import Observation
 import SwiftData
 import SwiftUI
 import UIKit
@@ -16,6 +17,11 @@ enum HolderMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+@Observable
+final class CardHolderHeaderCollapseState {
+    var offset: CGFloat = 0
+}
+
 private enum HolderCardEditorMode: Identifiable {
     case create
 
@@ -24,21 +30,48 @@ private enum HolderCardEditorMode: Identifiable {
     var draft: BusinessCardDraft { BusinessCardDraft() }
 }
 
+private enum HolderScrollSource: Equatable {
+    case grouped
+    case list
+}
+
+private enum HolderHeaderScrollDirection: Equatable {
+    case collapsing
+    case expanding
+}
+
+private struct HolderScrollMetrics: Equatable {
+    let offsetY: CGFloat
+    let maximumOffsetY: CGFloat
+}
+
 struct CardHolderView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.cardaReduceMotion) private var settingsReduceMotion
     @Query(sort: \BusinessCardList.sortOrder) private var cardLists: [BusinessCardList]
+    @AppStorage(CardaSettingsPreferenceKeys.confirmsCardDeletion)
+    private var confirmsCardDeletion = true
 
     let cards: [BusinessCard]
     let accountAvatarImageData: Data?
     let accountName: String?
+    let accountPhoneNumber: String?
     let accountEmail: String?
     let isAccountLoggedIn: Bool
+    let onUpdateAccount: (Data?, String, String, String) -> Bool
+    let onLogout: () -> Bool
     let onAddList: () -> Void
     let onRenameList: (BusinessCardList) -> Void
     let onDeleteList: (BusinessCardList) -> Void
     let onInfoAction: (CardFieldKind, String) -> Void
     @Binding var mode: HolderMode
+    let headerCollapseState: CardHolderHeaderCollapseState
     var showsPageBackground = true
+
+    private var accessibilityReduceMotion: Bool {
+        systemReduceMotion || settingsReduceMotion
+    }
 
     @State private var expandedCardID: UUID?
     @State private var expandedListID: String?
@@ -46,12 +79,11 @@ struct CardHolderView: View {
     @State private var isAddSheetPresented = false
     @State private var isContextMenuVisible = false
     @State private var contextMenuCardID: UUID?
-    @State private var cardFrames: [UUID: CGRect] = [:]
+    @State private var geometryFrameStore = HolderGeometryFrameStore()
     @State private var contextMenuDragStartOffsetY: CGFloat?
     @State private var contextMenuDragDismissProgress: CGFloat = 0
     @State private var listContextMenuListID: UUID?
     @State private var listContextMenuRowID: String?
-    @State private var listModeRowFrames: [String: CGRect] = [:]
     @State private var dropTargetListRowID: String?
     @State private var draggingListCardID: UUID?
     @State private var collapsedDragSourceListID: String?
@@ -59,28 +91,50 @@ struct CardHolderView: View {
     @State private var collapsedDragSourceScrollOffsetY: CGFloat?
     @State private var listScrollRequest: ListScrollRequest?
     @State private var listScrollPosition = ScrollPosition()
-    @State private var listScrollOffsetY: CGFloat = 0
     @State private var groupedScrollPosition = ScrollPosition()
-    @State private var groupedScrollOffsetY: CGFloat = 0
+    @State private var scrollRuntime = HolderScrollRuntime()
+    @State private var derivedDataCache = HolderDerivedDataCache()
     @State private var ignoreListRowGesturesUntil = Date.distantPast
     @State private var saveMessage: String?
     @State private var cardPendingDeletionID: UUID?
     @State private var revealedDeleteCardID: UUID?
     @State private var alphabetIndexRequest: AlphabetIndexRequest?
+    @State private var retainedGroupedHeaderTitle: String?
     @State private var delayedGroupedHeaderTitles: Set<String> = []
     @State private var groupedHeaderTransitionGeneration = 0
+    @State private var modeInteractionGeneration = 0
+    @State private var groupedHeaderTransitionActive = false
     @State private var suppressGroupedContentAnimation = false
+    @State private var headerMorphProgress: CGFloat = 0
+    @State private var headerLeftControlProgress: CGFloat = 0
+    @State private var headerRightLabelRevealProgress: CGFloat = 0
+    @State private var headerMorphGeneration = 0
+    @State private var isHeaderModeTransitioning = false
+    @State private var isMultiSelecting = false
+    @State private var selectedCardIDs: Set<UUID> = []
     private let groupedHeaderHeight: CGFloat = 20
     private let groupedHeaderTransitionGap: CGFloat = 10
+    private let groupedHeaderTopInset: CGFloat = 24
     private let holderPanelTop: CGFloat = 126
     private let holderContentTop: CGFloat = 164
+    private let holderCollapsedContentTop: CGFloat = 54
+    private let holderHeaderClipTop: CGFloat = 62
     private let holderTopCardMaskTop: CGFloat = 178
     private let holderTopCardMaskHeight: CGFloat = 47
     private let holderTopCardMaskHorizontalInset: CGFloat = 16
-    private let holderBottomBlurTop: CGFloat = 737
-    private let holderBottomBlurHeight: CGFloat = 140
+    private let holderBottomSoftEdgeTop: CGFloat = 737
+    private let holderBottomSoftEdgeHeight: CGFloat = 140
     private let listContextMenuHeight: CGFloat = 104
     private let listContextMenuGap: CGFloat = 8
+    private let listStickyHeaderExpandedMaskHeight: CGFloat = 33
+    private let listStickyHeaderClipInsetHeight: CGFloat = 12
+    private let listStickyHeaderPinInsetHeight: CGFloat = 7
+    private let listStickyHeaderRowHeight: CGFloat = 53
+    private let headerMorphDuration: TimeInterval = 0.56
+    // The forward cubic reaches 50% of its spatial presentation at
+    // 0.137945 of the duration. Reveal starts at that exact halfway shape.
+    private let headerLabelRevealDelay: TimeInterval = 0.07725
+    private let headerLabelRevealDuration: TimeInterval = 0.58275
     private static let holderCoordinateSpaceName = "CardHolderCoordinateSpace"
 
     var body: some View {
@@ -94,15 +148,19 @@ struct CardHolderView: View {
                 if cards.isEmpty {
                     emptyState
                         .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+                        .zIndex(1)
                 } else {
                     contentForMode
+                        .zIndex(1)
                 }
 
-                holderBottomBlur
-                    .zIndex(4)
+                if !cards.isEmpty {
+                    holderBottomSoftEdge
+                        .zIndex(5)
+                }
 
-                topModeBar
-                    .zIndex(5)
+                collapsibleTopModeBar
+                    .zIndex(9)
 
                 if mode != .list && !cards.isEmpty {
                     ContactAlphabetIndex { letter in
@@ -203,7 +261,10 @@ struct CardHolderView: View {
             AddCardSheet(
                 accountAvatarImageData: accountAvatarImageData,
                 accountName: accountName,
-                accountEmail: accountEmail
+                accountPhoneNumber: accountPhoneNumber,
+                accountEmail: accountEmail,
+                onUpdateAccount: onUpdateAccount,
+                onLogout: onLogout
             ) {
                 isAddSheetPresented = false
                 editorMode = .create
@@ -237,15 +298,31 @@ struct CardHolderView: View {
         } message: {
             Text("删除后无法恢复。")
         }
+        .onAppear {
+            resetHeaderTrackingForModeChange()
+            setHeaderCollapseOffset(0, animated: false)
+        }
         .onChange(of: expandedCardID) { _, _ in
             withAnimation(.snappy(duration: 0.22)) {
                 revealedDeleteCardID = nil
             }
         }
-        .onChange(of: expandedListID) { _, _ in
+        .onChange(of: expandedListID) { _, newExpandedListID in
             withAnimation(.snappy(duration: 0.22)) {
                 revealedDeleteCardID = nil
             }
+
+            guard mode == .list, newExpandedListID == nil else { return }
+            resetHeaderDirectionTracking()
+            setHeaderCollapseOffset(0, animated: !accessibilityReduceMotion)
+        }
+        .onChange(of: cards.isEmpty) { _, isEmpty in
+            guard isEmpty else { return }
+            exitMultiSelection()
+            setHeaderCollapseOffset(0, animated: !accessibilityReduceMotion)
+        }
+        .onChange(of: cards.map(\.id)) { _, cardIDs in
+            selectedCardIDs.formIntersection(cardIDs)
         }
     }
 
@@ -265,67 +342,217 @@ struct CardHolderView: View {
                 height: mode == .list ? 821 : 811,
                 alignment: .top
             )
-            .offset(y: holderPanelTop)
+            .offset(y: currentHolderPanelTop)
     }
 
     private var holderPinnedBackgroundColor: Color {
         CardaTheme.searchBackground
     }
 
-    private var holderScrollHeight: CGFloat {
-        CardaTheme.canvasHeight - holderContentTop
+    private var holderPageBackgroundColor: Color {
+        Color(red: 243 / 255, green: 243 / 255, blue: 243 / 255)
     }
 
-    private var holderBottomBlur: some View {
-        TransparentGradientBlur(
-            height: holderBottomBlurHeight,
-            tintColor: holderPinnedBackgroundColor,
-            matchesOpaqueEdgeColor: true
-        )
-            .offset(y: holderBottomBlurTop)
+    private var holderScrollHeight: CGFloat {
+        CardaTheme.canvasHeight - holderCollapsedContentTop
+    }
+
+    private var listStickyHeaderMaskTravel: CGFloat {
+        listStickyHeaderExpandedMaskHeight - listStickyHeaderPinInsetHeight
+    }
+
+    private var headerCollapseDistance: CGFloat {
+        holderContentTop - holderCollapsedContentTop
+    }
+
+    private var clampedHeaderCollapseOffset: CGFloat {
+        min(max(headerCollapseState.offset, 0), headerCollapseDistance)
+    }
+
+    private var currentHolderPanelTop: CGFloat {
+        holderPanelTop - clampedHeaderCollapseOffset
+    }
+
+    private var currentHolderContentTop: CGFloat {
+        holderContentTop - clampedHeaderCollapseOffset
+    }
+
+    private var currentHolderTopCardMaskTop: CGFloat {
+        currentHolderContentTop + (holderTopCardMaskTop - holderContentTop)
+    }
+
+    private var currentGroupedHeaderPinTop: CGFloat {
+        currentHolderContentTop + groupedHeaderTopInset
+    }
+
+    private var collapsibleTopModeBar: some View {
+        topModeBar
+            .modifier(
+                CardHolderHeaderChromeModifier(
+                    collapseState: headerCollapseState,
+                    maximumOffset: headerCollapseDistance,
+                    clipTop: holderHeaderClipTop
+                )
+            )
     }
 
     private var topModeBar: some View {
         ZStack(alignment: .topLeading) {
-            if mode == .list {
-                Text("名片夹")
-                    .font(CardaTheme.pingFang(size: 22, weight: .semibold))
-                    .foregroundStyle(Color.black)
-                    .lineLimit(1)
-                    .frame(width: 80, height: 28, alignment: .center)
-                    .position(x: CardaTheme.canvasWidth / 2, y: 88)
-
-                listToolbarButton(title: "多选", width: 72, textLeading: 19, action: {})
-                    .position(x: 52, y: 88)
-
-                listToolbarButton(
-                    title: "添加列表",
-                    width: 112,
-                    textLeading: 22,
-                    action: onAddList
-                )
-                    .position(x: 330, y: 88)
-            } else {
-                Text("名片夹")
-                    .font(CardaTheme.pingFang(size: 34, weight: .semibold))
-                    .tracking(0.4)
-                    .foregroundStyle(Color.black)
-                    .lineLimit(1)
-                    .frame(width: 370, height: 41, alignment: .leading)
-                    .offset(x: 16, y: 62)
-
-                UserAvatarButton(
-                    imageData: accountAvatarImageData,
-                    isLoggedIn: isAccountLoggedIn
-                ) {
-                    isAddSheetPresented = true
-                }
-                    .offset(x: 342, y: 62)
-            }
+            morphingHolderTitle
+            morphingHeaderActionControls
 
             holderModeTabs
         }
         .frame(width: CardaTheme.canvasWidth, height: 171, alignment: .topLeading)
+        .onAppear {
+            synchronizeHeaderMorphState()
+        }
+        .onChange(of: mode) { oldMode, newMode in
+            guard (oldMode == .list) != (newMode == .list) else { return }
+            animateHeaderTransition(to: newMode)
+        }
+    }
+
+    private var morphingHolderTitle: some View {
+        let progress = clampedHeaderMorphProgress
+        let groupedScale: CGFloat = 1
+        let listScale: CGFloat = 22 / 34
+
+        return Text("名片夹")
+            .font(CardaTheme.pingFang(size: 34, weight: .semibold))
+            .tracking(0.4 * Double(1 - progress))
+            .foregroundStyle(Color.black)
+            .lineLimit(1)
+            .fixedSize()
+            .scaleEffect(
+                groupedScale + (listScale - groupedScale) * progress
+            )
+            .position(
+                x: 67 + (CardaTheme.canvasWidth / 2 - 67) * progress,
+                y: 82.5 + (88 - 82.5) * progress
+            )
+            .modifier(headerTextOpacityModifier)
+    }
+
+    private var morphingHeaderActionControls: some View {
+        headerActionControls
+    }
+
+    private var headerActionControls: some View {
+        ZStack(alignment: .topLeading) {
+            morphingLeftListControl
+            morphingAvatarListControl
+        }
+        .frame(width: CardaTheme.canvasWidth, height: 116, alignment: .topLeading)
+    }
+
+    private var morphingLeftListControl: some View {
+        let progress = min(max(headerLeftControlProgress, 0), 1)
+
+        return Button {
+            if isMultiSelecting {
+                exitMultiSelection()
+            } else {
+                enterMultiSelection()
+            }
+        } label: {
+            ZStack {
+                FigmaGlassShape(cornerRadius: 296, interactive: true)
+
+                Text(isMultiSelecting ? "退出" : "多选")
+                    .font(CardaTheme.pingFang(size: 17, weight: .medium))
+                    .foregroundStyle(Color.black)
+                    .lineLimit(1)
+                    .blur(radius: 15 * (1 - progress))
+                    .opacity(Double(progress))
+                    .modifier(headerTextOpacityModifier)
+            }
+            .frame(width: 72, height: 46)
+            .scaleEffect(max(progress, 0.001))
+            .opacity(Double(min(progress * 3, 1)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .position(x: 52, y: 88)
+        .allowsHitTesting(mode == .list && !isHeaderModeTransitioning)
+        .accessibilityHidden(isHeaderModeTransitioning || mode != .list)
+    }
+
+    private var morphingAvatarListControl: some View {
+        let progress = clampedHeaderMorphProgress
+        let width = 44 + (112 - 44) * progress
+        let height = 44 + (46 - 44) * progress
+        let cornerRadius = 22 + progress
+        let hasAvatarImage = isAccountLoggedIn && accountAvatarImageData != nil
+
+        return Button {
+            guard !isHeaderModeTransitioning else { return }
+            if mode == .list {
+                if isMultiSelecting {
+                    cancelCardSelection()
+                } else {
+                    onAddList()
+                }
+            } else {
+                isAddSheetPresented = true
+            }
+        } label: {
+            AccountAvatarGlassSurface(
+                width: width,
+                height: height,
+                cornerRadius: cornerRadius,
+                interactive: true
+            )
+            .opacity(hasAvatarImage ? Double(min(progress * 2, 1)) : 1)
+            .overlay {
+                if hasAvatarImage {
+                    DataImageView(data: accountAvatarImageData)
+                        .frame(width: width, height: height)
+                        .modifier(
+                            CardHolderAvatarMorphModifier(progress: progress)
+                        )
+                        .frame(width: width, height: height)
+                        .clipShape(
+                            RoundedRectangle(
+                                cornerRadius: cornerRadius,
+                                style: .circular
+                            )
+                        )
+                }
+            }
+            .overlay {
+                MorphingCardHolderListLabel(
+                    text: isMultiSelecting ? "取消选择" : "添加列表",
+                    spreadProgress: progress,
+                    revealProgress: headerRightLabelRevealProgress
+                )
+                .modifier(headerTextOpacityModifier)
+            }
+            .contentShape(
+                RoundedRectangle(
+                    cornerRadius: cornerRadius,
+                    style: .circular
+                )
+            )
+        }
+        .buttonStyle(.plain)
+        .position(
+            x: 364 + (330 - 364) * progress,
+            y: 84 + (88 - 84) * progress
+        )
+        .allowsHitTesting(!isHeaderModeTransitioning)
+        .accessibilityLabel(
+            mode == .list
+                ? (isMultiSelecting ? "取消选择" : "添加列表")
+                : "用户头像"
+        )
+        .accessibilityValue(hasAvatarImage ? "已设置头像" : "未设置头像")
+        .accessibilityIdentifier("card-holder-morphing-avatar-list-control")
+        .accessibilityHidden(isHeaderModeTransitioning)
+    }
+
+    private var clampedHeaderMorphProgress: CGFloat {
+        min(max(headerMorphProgress, 0), 1)
     }
 
     private var holderModeTabs: some View {
@@ -339,6 +566,14 @@ struct CardHolderView: View {
                     .frame(width: CardaTheme.canvasWidth, height: 45)
                     .offset(y: holderPanelTop)
                     .zIndex(1)
+            } else if mode == .list {
+                // List content starts at the Union body edge (y=164), while the
+                // unselected Figma tab tails continue to y≈171. Repaint only
+                // those white tab silhouettes in the navigation foreground so
+                // the sticky header can never cover the 公司/姓名 tab tails.
+                HolderModeTabsBackground(mode: mode)
+                    .allowsHitTesting(false)
+                    .zIndex(1)
             }
 
             categoryButton(.list, x: 65)
@@ -351,18 +586,41 @@ struct CardHolderView: View {
     }
 
     private func categoryButton(_ item: HolderMode, x: CGFloat) -> some View {
-        Button {
+        let tabsBackground = HolderModeTabsBackground(mode: mode)
+        let hitFrame = tabsBackground.modeTabFrame(for: item)
+        let hitShape = tabsBackground.modeTabShape(for: item)
+
+        return Button {
             selectMode(item)
         } label: {
-            Text(item.rawValue)
-                .font(CardaTheme.pingFang(size: 15, weight: .regular))
-                .foregroundStyle(modeTabTextColor(for: item))
-                .lineLimit(1)
-                .frame(width: 46, height: 20, alignment: .center)
-                .contentShape(Rectangle())
+            ZStack(alignment: .topLeading) {
+                Color.clear
+
+                Text(item.rawValue)
+                    .font(CardaTheme.pingFang(size: 15, weight: .regular))
+                    .foregroundStyle(modeTabTextColor(for: item))
+                    .lineLimit(1)
+                    .frame(width: 46, height: 20, alignment: .center)
+                    .position(
+                        x: x - hitFrame.x,
+                        y: 145 - hitFrame.y
+                    )
+                    .modifier(headerTextOpacityModifier)
+            }
+            .frame(
+                width: hitFrame.width,
+                height: hitFrame.height,
+                alignment: .topLeading
+            )
+            .contentShape(hitShape)
         }
         .buttonStyle(.plain)
-        .position(x: x, y: 145)
+        .accessibilityIdentifier("card-holder-mode-\(item.rawValue)")
+        .accessibilityValue(mode == item ? "已选择" : "未选择")
+        .position(
+            x: hitFrame.x + hitFrame.width / 2,
+            y: hitFrame.y + hitFrame.height / 2
+        )
     }
 
     private func modeTabTextColor(for item: HolderMode) -> Color {
@@ -371,27 +629,11 @@ struct CardHolderView: View {
             : CardHolderFigmaColor.segmentText
     }
 
-    private func listToolbarButton(
-        title: String,
-        width: CGFloat,
-        textLeading: CGFloat,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            ZStack(alignment: .topLeading) {
-                FigmaGlassShape(cornerRadius: 296, interactive: true)
-                    .shadow(color: .black.opacity(0.0225), radius: 9, x: 0, y: 2)
-
-                Text(title)
-                    .font(CardaTheme.pingFang(size: 17, weight: .medium))
-                    .foregroundStyle(Color.black)
-                    .lineLimit(1)
-                    .frame(height: 22, alignment: .leading)
-                    .offset(x: textLeading, y: 12)
-            }
-        }
-        .buttonStyle(.plain)
-        .frame(width: width, height: 46)
+    private var headerTextOpacityModifier: CardHolderHeaderTextOpacityModifier {
+        CardHolderHeaderTextOpacityModifier(
+            collapseState: headerCollapseState,
+            maximumOffset: headerCollapseDistance
+        )
     }
 
     @ViewBuilder
@@ -405,10 +647,12 @@ struct CardHolderView: View {
     }
 
     private var groupedCardContent: some View {
-        ScrollViewReader { scrollProxy in
+        let groupedMode = mode
+
+        return ScrollViewReader { scrollProxy in
             ZStack(alignment: .topLeading) {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14, pinnedViews: [.sectionHeaders]) {
+                    LazyVStack(alignment: .leading, spacing: 14) {
                         ForEach(groupedCards) { group in
                             Section {
                                 VStack(spacing: 8) {
@@ -418,10 +662,13 @@ struct CardHolderView: View {
                                 }
                                 .padding(.top, -12)
                             } header: {
-                                trackedGroupTitle(group.title)
+                                trackedGroupTitle(group.title, mode: groupedMode)
                             }
                             .id(group.id)
                         }
+                    }
+                    .background {
+                        scrollPanObserver(source: .grouped)
                     }
                     // Mode changes animate the shared foreground headers, not stale list rows.
                     .transaction { transaction in
@@ -442,19 +689,19 @@ struct CardHolderView: View {
                 )
                 .safeAreaInset(edge: .top, spacing: 0) {
                     Color.clear
-                        .frame(height: 24)
+                        .frame(height: 24 + headerCollapseDistance)
                         .allowsHitTesting(false)
                 }
                 .mask(alignment: .topLeading) {
                     groupedScrollClipMask
                 }
-                .offset(y: holderContentTop)
+                .offset(y: holderCollapsedContentTop)
                 .scrollIndicators(.hidden)
                 .scrollPosition($groupedScrollPosition)
-                .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                    geometry.contentOffset.y + geometry.contentInsets.top
-                } action: { _, offsetY in
-                    groupedScrollOffsetY = max(0, offsetY)
+                .onScrollGeometryChange(for: HolderScrollMetrics.self) { geometry in
+                    holderScrollMetrics(from: geometry)
+                } action: { _, metrics in
+                    handleScrollMetrics(metrics, source: .grouped)
                 }
 
                 holderTopCardGradientMask
@@ -466,17 +713,54 @@ struct CardHolderView: View {
             )
             .overlayPreferenceValue(GroupedHeaderAnchorPreferenceKey.self) { headers in
                 GeometryReader { proxy in
-                    ForEach(headers, id: \.title) { header in
-                        let frame = proxy[header.bounds]
-                        groupTitle(header.title)
-                            .position(x: frame.midX, y: frame.midY)
-                            .transition(groupedHeaderTransition(for: header.title))
+                    let activeHeaders = headers.filter { $0.mode == groupedMode }
+                    let frames = activeHeaders.map { proxy[$0.bounds] }
+                    let pinnedTitle = resolvedGroupedPinnedHeaderTitle(
+                        headers: activeHeaders,
+                        frames: frames
+                    )
+
+                    ZStack(alignment: .topLeading) {
+                        ForEach(Array(activeHeaders.enumerated()), id: \.element.id) { index, header in
+                            let frame = frames[index]
+                            if header.title != pinnedTitle {
+                                groupTitle(header.title)
+                                    .position(x: frame.midX, y: frame.midY)
+                                    .transition(
+                                        groupedHeaderTransitionActive
+                                            ? groupedHeaderTransition(for: header.title)
+                                            : .identity
+                                    )
+                            }
+                        }
+
+                        if let pinnedTitle {
+                            groupTitle(pinnedTitle)
+                                .opacity(
+                                    groupedPinnedHeaderOpacity(
+                                        pinnedTitle: pinnedTitle,
+                                        headers: activeHeaders,
+                                        frames: frames
+                                    )
+                                )
+                                .position(
+                                    x: CardaTheme.canvasWidth / 2,
+                                    y: currentGroupedHeaderPinTop
+                                        + (groupedHeaderHeight + groupedHeaderTransitionGap) / 2
+                                )
+                        }
+
+                        PinnedHeaderRetentionObserver(value: pinnedTitle) { title in
+                            guard mode == groupedMode else { return }
+                            guard retainedGroupedHeaderTitle != title else { return }
+                            retainedGroupedHeaderTitle = title
+                        }
                     }
                 }
                 .mask(alignment: .topLeading) {
                     VStack(spacing: 0) {
                         Color.clear
-                            .frame(height: holderContentTop)
+                            .frame(height: currentHolderContentTop)
 
                         Rectangle()
                             .fill(Color.black)
@@ -500,18 +784,28 @@ struct CardHolderView: View {
                 else {
                     return
                 }
+                prepareForProgrammaticScroll()
                 scrollProxy.scrollTo(targetID, anchor: .top)
             }
         }
     }
 
-    private func trackedGroupTitle(_ title: String) -> some View {
+    private func trackedGroupTitle(
+        _ title: String,
+        mode: HolderMode
+    ) -> some View {
         groupTitle(title)
             .anchorPreference(
                 key: GroupedHeaderAnchorPreferenceKey.self,
                 value: .bounds
             ) {
-                [GroupedHeaderAnchor(title: title, bounds: $0)]
+                [
+                    GroupedHeaderAnchor(
+                        mode: mode,
+                        title: title,
+                        bounds: $0
+                    )
+                ]
             }
             .opacity(0)
     }
@@ -530,8 +824,68 @@ struct CardHolderView: View {
             .allowsHitTesting(false)
     }
 
+    private func resolvedGroupedPinnedHeaderTitle(
+        headers: [GroupedHeaderAnchor],
+        frames: [CGRect]
+    ) -> String? {
+        if let candidateIndex = frames.indices.last(where: { index in
+            frames[index].minY <= currentGroupedHeaderPinTop
+        }) {
+            return headers[candidateIndex].title
+        }
+
+        let groups = groupedCards
+        guard
+            let retainedGroupedHeaderTitle,
+            let retainedGroupIndex = groups.firstIndex(where: {
+                $0.title == retainedGroupedHeaderTitle
+            })
+        else {
+            return nil
+        }
+
+        if let visibleRetainedIndex = headers.firstIndex(where: {
+            $0.title == retainedGroupedHeaderTitle
+        }), frames[visibleRetainedIndex].minY > currentGroupedHeaderPinTop {
+            guard retainedGroupIndex > groups.startIndex else { return nil }
+            return groups[groups.index(before: retainedGroupIndex)].title
+        }
+
+        return retainedGroupedHeaderTitle
+    }
+
+    private func groupedPinnedHeaderOpacity(
+        pinnedTitle: String,
+        headers: [GroupedHeaderAnchor],
+        frames: [CGRect]
+    ) -> Double {
+        let orderedTitles = groupedCards.map(\.title)
+        guard
+            let pinnedIndex = orderedTitles.firstIndex(of: pinnedTitle),
+            orderedTitles.indices.contains(pinnedIndex + 1),
+            let nextHeaderIndex = headers.firstIndex(where: {
+                $0.title == orderedTitles[pinnedIndex + 1]
+            })
+        else {
+            return 1
+        }
+
+        let pinnedVisualHeight = groupedHeaderHeight + groupedHeaderTransitionGap
+        let fadeStartY = currentGroupedHeaderPinTop + pinnedVisualHeight + 2.5
+        let fadeEndY = currentGroupedHeaderPinTop + pinnedVisualHeight / 2
+        let fadeDistance = max(fadeStartY - fadeEndY, 0.001)
+        let fadeProgress = min(
+            max((fadeStartY - frames[nextHeaderIndex].minY) / fadeDistance, 0),
+            1
+        )
+        return Double(1 - fadeProgress)
+    }
+
     private var groupedScrollClipMask: some View {
-        let topClipHeight = max(0, holderTopCardMaskTop - holderContentTop)
+        let topClipHeight = max(
+            0,
+            currentHolderTopCardMaskTop - holderCollapsedContentTop
+        )
 
         return VStack(spacing: 0) {
             Color.clear
@@ -549,27 +903,34 @@ struct CardHolderView: View {
     }
 
     private var holderTopCardGradientMask: some View {
-        LinearGradient(
-            stops: [
-                Gradient.Stop(color: holderPinnedBackgroundColor, location: 0),
-                Gradient.Stop(color: holderPinnedBackgroundColor.opacity(0.92), location: 0.2),
-                Gradient.Stop(color: holderPinnedBackgroundColor.opacity(0.62), location: 0.52),
-                Gradient.Stop(color: holderPinnedBackgroundColor.opacity(0.18), location: 0.82),
-                Gradient.Stop(color: .clear, location: 1)
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-        .frame(
+        TransparentGradientBlur(
             width: CardaTheme.canvasWidth - holderTopCardMaskHorizontalInset * 2,
-            height: holderTopCardMaskHeight
+            height: holderTopCardMaskHeight,
+            direction: .top,
+            materialStyle: .ultraThinLight,
+            tintColor: holderPinnedBackgroundColor,
+            tintOpacity: 0.84,
+            matchesOpaqueEdgeColor: true
         )
-        .offset(x: holderTopCardMaskHorizontalInset, y: holderTopCardMaskTop)
+        .offset(
+            x: holderTopCardMaskHorizontalInset,
+            y: currentHolderTopCardMaskTop
+        )
         .allowsHitTesting(false)
     }
 
+    private var holderBottomSoftEdge: some View {
+        FigmaScrollEdgeSoftOverlay(
+            width: CardaTheme.canvasWidth,
+            height: holderBottomSoftEdgeHeight,
+            direction: .bottom
+        )
+        .offset(y: holderBottomSoftEdgeTop)
+    }
+
     private func cardRowOrExpanded(_ card: BusinessCard) -> some View {
-        let isExpanded = expandedCardID == card.id
+        let isExpanded = !isMultiSelecting && expandedCardID == card.id
+        let isSelected = selectedCardIDs.contains(card.id)
         let cardHeight = isExpanded
             ? CardLayoutCalculator.height(for: card.renderData)
             : 60
@@ -600,6 +961,7 @@ struct CardHolderView: View {
             cardID: card.id,
             height: cardHeight,
             revealedCardID: $revealedDeleteCardID,
+            isSwipeEnabled: !isMultiSelecting,
             onDelete: {
                 requestDelete(card)
             }
@@ -615,7 +977,16 @@ struct CardHolderView: View {
                 if mode == .list && !isExpanded {
                     ListCardDragSource(
                         data: card.renderData,
-                        onTap: expandCard,
+                        dragItems: dragRenderData(for: card),
+                        isMultiSelecting: isMultiSelecting,
+                        isSelected: isSelected,
+                        onTap: {
+                            if isMultiSelecting {
+                                toggleCardSelection(card.id)
+                            } else {
+                                expandCard()
+                            }
+                        },
                         onDragBegan: {
                             draggingListCardID = card.id
                             collapseSourceListIfNeeded(for: card)
@@ -625,6 +996,13 @@ struct CardHolderView: View {
                         }
                     )
                     .frame(width: CardaTheme.cardWidth, height: 60)
+
+                    MultiSelectionCheckBadge(
+                        isVisible: isMultiSelecting && isSelected
+                    )
+                    .frame(width: 26, height: 26)
+                    .offset(x: 344, y: 0)
+                    .zIndex(2)
                 }
             }
         }
@@ -639,51 +1017,112 @@ struct CardHolderView: View {
         )
         .simultaneousGesture(
             cardContextMenuLongPress(for: card),
-            isEnabled: isExpanded
+            isEnabled: isExpanded && !isMultiSelecting
         )
         .onGeometryChange(for: CGRect.self) { geometry in
             geometry.frame(in: .named(Self.holderCoordinateSpaceName))
         } action: { _, frame in
-            cardFrames[card.id] = frame
+            geometryFrameStore.cardFrames[card.id] = frame
         }
     }
 
     private var listModeContent: some View {
-        ScrollViewReader { scrollProxy in
-            ZStack(alignment: .topLeading) {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        ForEach(Array(listRows.enumerated()), id: \.element.id) { index, row in
-                            Section {
-                                expandedListCards(row)
-                            } header: {
+        let rows = listRows
+
+        return ScrollViewReader { scrollProxy in
+            ScrollView {
+                LazyVStack(
+                    alignment: .leading,
+                    spacing: 0,
+                    pinnedViews: [.sectionHeaders]
+                ) {
+                    ListStickyHeaderMask(
+                        height: listStickyHeaderMaskTravel,
+                        backgroundColor: holderPinnedBackgroundColor
+                    )
+
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                        Section {
+                            expandedListCards(row)
+                        } header: {
+                            ListStickyHeader(backgroundColor: holderPinnedBackgroundColor) {
                                 listModeRow(
                                     row,
                                     showsTopSeparator: index > 0,
                                     scrollProxy: scrollProxy
                                 )
-                                .id(row.id)
                             }
+                            .id(row.id)
                         }
                     }
-                    .frame(width: CardaTheme.canvasWidth, alignment: .leading)
-                    .padding(.top, 33)
-                    .padding(.bottom, 255)
+                }
+                .background {
+                    scrollPanObserver(source: .list)
+                }
+                .frame(width: CardaTheme.canvasWidth, alignment: .leading)
+                .padding(.bottom, 255)
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                ListStickyHeaderMask(
+                    height: listStickyHeaderPinInsetHeight,
+                    backgroundColor: holderPinnedBackgroundColor
+                )
+            }
+            .frame(
+                width: CardaTheme.canvasWidth,
+                height: holderScrollHeight,
+                alignment: .top
+            )
+            // Keep the UIScrollView viewport stable while the complete sticky
+            // module moves visually. Resizing this frame from 710...820pt during
+            // the gesture changes ScrollGeometry.containerSize and feeds a
+            // synthetic reverse contentOffset back into direction detection.
+            .clipped()
+            .mask(alignment: .topLeading) {
+                VStack(spacing: 0) {
+                    Color.clear
+                        .frame(height: listStickyHeaderClipInsetHeight)
+
+                    Rectangle()
+                        .fill(Color.black)
+                        .frame(
+                            height: max(
+                                0,
+                                holderScrollHeight - listStickyHeaderClipInsetHeight
+                            )
+                        )
                 }
                 .frame(
                     width: CardaTheme.canvasWidth,
                     height: holderScrollHeight,
-                    alignment: .top
+                    alignment: .topLeading
                 )
-                .offset(y: holderContentTop)
-                .scrollIndicators(.hidden)
-                .scrollPosition($listScrollPosition)
-                .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                    geometry.contentOffset.y + geometry.contentInsets.top
-                } action: { _, offsetY in
-                    listScrollOffsetY = max(0, offsetY)
-                }
-
+            }
+            // This structural bridge is outside the content mask and moves with
+            // the complete sticky module. Even if the backing Union is being
+            // composited in a separate subtree, the module owns every pixel from
+            // its top edge to the 12pt clipping line.
+            .background(alignment: .topLeading) {
+                Rectangle()
+                    .fill(holderPinnedBackgroundColor)
+                    .frame(
+                        width: CardaTheme.canvasWidth,
+                        height: listStickyHeaderClipInsetHeight
+                    )
+            }
+            .modifier(
+                CardHolderCollapseTranslationModifier(
+                    collapseState: headerCollapseState,
+                    expandedY: holderContentTop,
+                    maximumOffset: headerCollapseDistance
+                )
+            )
+            .scrollIndicators(.hidden)
+            .scrollPosition($listScrollPosition)
+            .onScrollGeometryChange(for: HolderScrollMetrics.self) { geometry in
+                holderScrollMetrics(from: geometry)
+            } action: { _, metrics in
+                handleScrollMetrics(metrics, source: .list)
             }
             .frame(
                 width: CardaTheme.canvasWidth,
@@ -700,6 +1139,7 @@ struct CardHolderView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + request.delay) {
                     guard listScrollRequest == request else { return }
 
+                    prepareForProgrammaticScroll()
                     withAnimation(.snappy(duration: 0.28)) {
                         switch request.target {
                         case .row(let rowID):
@@ -714,6 +1154,7 @@ struct CardHolderView: View {
             }
         }
     }
+
     private func expandedListCards(_ row: HolderListRow) -> some View {
         let isExpanded = expandedListID == row.id
 
@@ -754,10 +1195,16 @@ struct CardHolderView: View {
         showsTopSeparator: Bool,
         scrollProxy: ScrollViewProxy
     ) -> some View {
-        HStack(spacing: 0) {
+        let hasSelectedCard = row.cards.contains { selectedCardIDs.contains($0.id) }
+
+        return HStack(spacing: 0) {
             Text(row.title)
                 .font(CardaTheme.pingFang(size: 17, weight: .regular))
-                .foregroundStyle(row.isUncategorized ? Color.black.opacity(0.35) : Color.black)
+                .foregroundStyle(
+                    hasSelectedCard
+                        ? CardaTheme.systemSelectionBlue
+                        : row.isUncategorized ? Color.black.opacity(0.35) : Color.black
+                )
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .lineLimit(1)
 
@@ -771,6 +1218,10 @@ struct CardHolderView: View {
         }
         .frame(width: 330, height: 53)
         .padding(.horizontal, 16)
+        .background {
+            Rectangle()
+                .fill(CardaTheme.searchBackground)
+        }
         .overlay(alignment: .top) {
             if showsTopSeparator {
                 Rectangle()
@@ -788,31 +1239,41 @@ struct CardHolderView: View {
 
                     switch value {
                     case .first(true):
+                        guard !isMultiSelecting else { return }
                         presentListContextMenu(
                             for: row,
                             scrollProxy: scrollProxy
                         )
                     case .second:
-                        toggleListRow(row, scrollProxy: scrollProxy)
+                        toggleListRow(row)
                     default:
                         break
                     }
                 }
         )
         .accessibilityAddTraits(.isButton)
+        .accessibilityValue(
+            isMultiSelecting
+                ? hasSelectedCard ? "包含已选名片" : "未包含已选名片"
+                : ""
+        )
         .accessibilityAction {
             guard !shouldIgnoreListRowGesture() else { return }
-            toggleListRow(row, scrollProxy: scrollProxy)
+            toggleListRow(row)
         }
         .dropDestination(for: String.self) { items, _ in
-            moveDraggedCard(with: items, to: row)
+            moveDraggedCards(with: items, to: row)
         } isTargeted: { isTargeted in
             withAnimation(.snappy(duration: 0.16)) {
                 dropTargetListRowID = isTargeted ? row.id : nil
             }
         }
         .padding(.leading, 19)
-        .frame(width: CardaTheme.canvasWidth, height: 53, alignment: .leading)
+        .frame(
+            width: CardaTheme.canvasWidth,
+            height: listStickyHeaderRowHeight,
+            alignment: .leading
+        )
         .background(holderPinnedBackgroundColor)
         .overlay {
             if dropTargetListRowID == row.id {
@@ -827,7 +1288,7 @@ struct CardHolderView: View {
         .onGeometryChange(for: CGRect.self) { geometry in
             geometry.frame(in: .named(Self.holderCoordinateSpaceName))
         } action: { _, frame in
-            listModeRowFrames[row.id] = frame
+            geometryFrameStore.listRowFrames[row.id] = frame
         }
     }
 
@@ -845,7 +1306,7 @@ struct CardHolderView: View {
     private var cardContextMenuCenterY: CGFloat {
         guard
             let contextMenuCardID,
-            let frame = cardFrames[contextMenuCardID]
+            let frame = geometryFrameStore.cardFrames[contextMenuCardID]
         else {
             return 654
         }
@@ -863,43 +1324,7 @@ struct CardHolderView: View {
     }
 
     private func groupedCards(for mode: HolderMode) -> [GroupedCardSection] {
-        switch mode {
-        case .list:
-            return []
-        case .name:
-            let sorted = cards
-                .map { GroupedCardSortRecord(card: $0) }
-                .sorted { $0.nameSortKey < $1.nameSortKey }
-            return Dictionary(grouping: sorted) { record in
-                pinyinInitial(forSortKey: record.nameSortKey)
-            }
-            .map { key, records in
-                GroupedCardSection(
-                    title: key.isEmpty ? "#" : key,
-                    cards: records.map(\.card)
-                )
-            }
-            .sorted { $0.title < $1.title }
-        case .organization:
-            let sorted = cards
-                .map { GroupedCardSortRecord(card: $0) }
-                .sorted { lhs, rhs in
-                    if lhs.organizationSortKey == rhs.organizationSortKey {
-                        return lhs.nameSortKey < rhs.nameSortKey
-                    }
-                    return lhs.organizationSortKey < rhs.organizationSortKey
-                }
-            return Dictionary(grouping: sorted) { record in
-                pinyinInitial(forSortKey: record.organizationSortKey)
-            }
-            .map { initial, records in
-                GroupedCardSection(
-                    title: initial,
-                    cards: records.map(\.card)
-                )
-            }
-            .sorted { alphabetSectionComesBefore($0.title, $1.title) }
-        }
+        derivedDataCache.groupedCards(for: mode, cards: cards)
     }
 
     private func groupedSectionID(for letter: String) -> String? {
@@ -914,41 +1339,7 @@ struct CardHolderView: View {
     }
 
     private var listRows: [HolderListRow] {
-        let validListIDs = Set(cardLists.map(\.id))
-        let sortedLists = cardLists.sorted {
-            if $0.sortOrder == $1.sortOrder {
-                return $0.createdAt < $1.createdAt
-            }
-            return $0.sortOrder < $1.sortOrder
-        }
-        let assignedRows = sortedLists.map { list in
-            let assignedCards = cards
-                .filter { $0.cardListID == list.id }
-                .sorted { $0.createdAt > $1.createdAt }
-            return HolderListRow(
-                id: list.id.uuidString,
-                listID: list.id,
-                title: "\(list.name)（\(assignedCards.count)）",
-                cards: assignedCards,
-                isUncategorized: false
-            )
-        }
-        let uncategorizedCards = cards
-            .filter { card in
-                guard let cardListID = card.cardListID else { return true }
-                return !validListIDs.contains(cardListID)
-            }
-            .sorted { $0.createdAt > $1.createdAt }
-
-        return assignedRows + [
-            HolderListRow(
-                id: "uncategorized",
-                listID: nil,
-                title: "未分类（\(uncategorizedCards.count)）",
-                cards: uncategorizedCards,
-                isUncategorized: true
-            )
-        ]
+        derivedDataCache.listRows(cards: cards, lists: cardLists)
     }
 
     private func cardsForList(_ row: HolderListRow) -> [BusinessCard] {
@@ -964,12 +1355,24 @@ struct CardHolderView: View {
         return cardListID.uuidString
     }
 
+    private func dragRenderData(for sourceCard: BusinessCard) -> [CardRenderData] {
+        guard isMultiSelecting else { return [sourceCard.renderData] }
+        guard selectedCardIDs.contains(sourceCard.id) else { return [] }
+
+        let remainingSelectedCards = listRows
+            .flatMap(\.cards)
+            .filter {
+                $0.id != sourceCard.id && selectedCardIDs.contains($0.id)
+            }
+        return [sourceCard.renderData] + remainingSelectedCards.map(\.renderData)
+    }
+
     private func collapseSourceListIfNeeded(for card: BusinessCard) {
         let sourceRowID = listRowID(for: card)
         guard expandedListID == sourceRowID else { return }
         collapsedDragSourceListID = sourceRowID
         collapsedDragSourceCardID = card.id
-        collapsedDragSourceScrollOffsetY = listScrollOffsetY
+        collapsedDragSourceScrollOffsetY = scrollRuntime.listOffsetY
 
         withAnimation(.snappy(duration: 0.24)) {
             expandedCardID = nil
@@ -1125,11 +1528,155 @@ struct CardHolderView: View {
             }
     }
 
+    nonisolated private func holderScrollMetrics(
+        from geometry: ScrollGeometry
+    ) -> HolderScrollMetrics {
+        let normalizedOffsetY = geometry.contentOffset.y + geometry.contentInsets.top
+        let maximumOffsetY = max(
+            0,
+            geometry.contentSize.height
+                + geometry.contentInsets.top
+                + geometry.contentInsets.bottom
+                - geometry.containerSize.height
+        )
+        let displayScale: CGFloat = 3
+        return HolderScrollMetrics(
+            offsetY: (normalizedOffsetY * displayScale).rounded() / displayScale,
+            maximumOffsetY: (maximumOffsetY * displayScale).rounded() / displayScale
+        )
+    }
+
+    private var activeScrollSource: HolderScrollSource {
+        mode == .list ? .list : .grouped
+    }
+
+    private func scrollPanObserver(
+        source: HolderScrollSource
+    ) -> some View {
+        ScrollViewPanObserver(
+            generation: modeInteractionGeneration,
+            onChanged: { delta in
+                handleHeaderPanDelta(
+                    delta,
+                    source: source
+                )
+            },
+            onEnded: {
+                finishHeaderPan(source: source)
+            }
+        )
+        .frame(width: 0, height: 0)
+        .allowsHitTesting(false)
+    }
+
+    private func handleHeaderPanDelta(
+        _ delta: CGSize,
+        source: HolderScrollSource
+    ) {
+        guard source == activeScrollSource else { return }
+        guard abs(delta.height) > abs(delta.width) else { return }
+
+        registerHeaderIntent(
+            delta.height < 0 ? .collapsing : .expanding,
+            distance: abs(delta.height),
+            source: source
+        )
+    }
+
+    private func finishHeaderPan(source: HolderScrollSource) {
+        guard source == activeScrollSource else { return }
+        resetHeaderDirectionTracking()
+    }
+
+    private func handleScrollMetrics(
+        _ metrics: HolderScrollMetrics,
+        source: HolderScrollSource
+    ) {
+        let visibleOffsetY = visibleScrollOffset(for: metrics)
+
+        switch source {
+        case .grouped:
+            scrollRuntime.groupedOffsetY = visibleOffsetY
+        case .list:
+            scrollRuntime.listOffsetY = visibleOffsetY
+        }
+    }
+
+    private func visibleScrollOffset(for metrics: HolderScrollMetrics) -> CGFloat {
+        min(max(metrics.offsetY, 0), metrics.maximumOffsetY)
+    }
+
+    private func registerHeaderIntent(
+        _ direction: HolderHeaderScrollDirection,
+        distance: CGFloat,
+        source: HolderScrollSource
+    ) {
+        guard source == activeScrollSource else { return }
+        guard source != .list || direction != .collapsing || expandedListID != nil else {
+            resetHeaderDirectionTracking()
+            return
+        }
+        guard scrollRuntime.direction != direction else { return }
+
+        if scrollRuntime.pendingDirection != direction {
+            scrollRuntime.pendingDirection = direction
+            scrollRuntime.pendingDistance = 0
+        }
+        scrollRuntime.pendingDistance += distance
+
+        // One point filters subpoint finger jitter without delaying a deliberate
+        // direction. After confirmation, write exactly one binary header target;
+        // content offset and ScrollPosition are never modified by this transition.
+        guard scrollRuntime.pendingDistance >= 1 else { return }
+
+        scrollRuntime.direction = direction
+        scrollRuntime.pendingDirection = nil
+        scrollRuntime.pendingDistance = 0
+        setHeaderCollapseOffset(
+            direction == .collapsing ? headerCollapseDistance : 0,
+            animated: !accessibilityReduceMotion
+        )
+    }
+
+    private func setHeaderCollapseOffset(_ offset: CGFloat, animated: Bool) {
+        let clampedOffset = min(max(offset, 0), headerCollapseDistance)
+        guard abs(clampedOffset - headerCollapseState.offset) > 0.01 else { return }
+        let update = {
+            headerCollapseState.offset = clampedOffset
+        }
+
+        if animated {
+            withAnimation(
+                .timingCurve(0.2, 0.72, 0.18, 1, duration: 0.2),
+                update
+            )
+        } else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction, update)
+        }
+    }
+
+    private func resetHeaderDirectionTracking() {
+        scrollRuntime.direction = nil
+        scrollRuntime.pendingDirection = nil
+        scrollRuntime.pendingDistance = 0
+    }
+
+    private func prepareForProgrammaticScroll() {
+        resetHeaderDirectionTracking()
+    }
+
+    private func resetHeaderTrackingForModeChange() {
+        resetHeaderDirectionTracking()
+    }
+
     private var currentCardContextMenuScrollOffsetY: CGFloat {
-        mode == .list ? listScrollOffsetY : groupedScrollOffsetY
+        mode == .list ? scrollRuntime.listOffsetY : scrollRuntime.groupedOffsetY
     }
 
     private func scrollCardHolder(to offsetY: CGFloat, animated: Bool) {
+        prepareForProgrammaticScroll()
         let update = {
             if mode == .list {
                 listScrollPosition.scrollTo(y: offsetY)
@@ -1157,8 +1704,132 @@ struct CardHolderView: View {
         }
     }
 
+    private func synchronizeHeaderMorphState() {
+        headerMorphGeneration &+= 1
+        let target: CGFloat = mode == .list ? 1 : 0
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            headerMorphProgress = target
+            headerLeftControlProgress = target
+            headerRightLabelRevealProgress = target
+            isHeaderModeTransitioning = false
+        }
+    }
+
+    private func animateHeaderTransition(to newMode: HolderMode) {
+        headerMorphGeneration &+= 1
+        let generation = headerMorphGeneration
+        let movesToList = newMode == .list
+
+        guard !accessibilityReduceMotion else {
+            synchronizeHeaderMorphState()
+            return
+        }
+
+        isHeaderModeTransitioning = true
+
+        if movesToList {
+            headerRightLabelRevealProgress = 0
+
+            withAnimation(
+                .timingCurve(
+                    0.2,
+                    0.72,
+                    0.18,
+                    1,
+                    duration: headerMorphDuration
+                )
+            ) {
+                headerMorphProgress = 1
+            }
+
+            withAnimation(
+                .timingCurve(0.16, 0.82, 0.24, 1, duration: 0.5)
+                    .delay(0.03)
+            ) {
+                headerLeftControlProgress = 1
+            }
+
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + headerLabelRevealDelay
+            ) {
+                guard headerMorphGeneration == generation, mode == .list else { return }
+                withAnimation(
+                    .timingCurve(
+                        0.22,
+                        0.78,
+                        0.2,
+                        1,
+                        duration: headerLabelRevealDuration
+                    )
+                ) {
+                    headerRightLabelRevealProgress = 1
+                }
+            }
+
+            DispatchQueue.main.asyncAfter(
+                deadline: .now()
+                    + headerLabelRevealDelay
+                    + headerLabelRevealDuration
+            ) {
+                guard headerMorphGeneration == generation, mode == .list else { return }
+                isHeaderModeTransitioning = false
+            }
+        } else {
+            withAnimation(
+                .timingCurve(
+                    0.22,
+                    0.78,
+                    0.2,
+                    1,
+                    duration: headerLabelRevealDuration
+                )
+            ) {
+                headerRightLabelRevealProgress = 0
+            }
+
+            // Use the same front-loaded curve in both directions so returning
+            // to the grouped header does not feel slower than entering list.
+            withAnimation(
+                .timingCurve(
+                    0.2,
+                    0.72,
+                    0.18,
+                    1,
+                    duration: headerMorphDuration
+                )
+            ) {
+                headerMorphProgress = 0
+            }
+
+            withAnimation(
+                .timingCurve(0.16, 0.82, 0.24, 1, duration: 0.5)
+                    .delay(0.03)
+            ) {
+                headerLeftControlProgress = 0
+            }
+
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + headerMorphDuration
+            ) {
+                guard headerMorphGeneration == generation, mode != .list else { return }
+                isHeaderModeTransitioning = false
+            }
+        }
+    }
+
     private func selectMode(_ item: HolderMode) {
         guard item != mode else { return }
+        if (mode == .list) != (item == .list) {
+            // Pre-arm the transition before the binding changes so the reverse
+            // path keeps the morphing surface until it reaches the 44pt circle.
+            isHeaderModeTransitioning = true
+        }
+        modeInteractionGeneration &+= 1
+        resetHeaderTrackingForModeChange()
+        setHeaderCollapseOffset(0, animated: false)
+        retainedGroupedHeaderTitle = nil
         prepareGroupedHeaderTransition(to: item)
         updateSelectedMode(item)
     }
@@ -1181,10 +1852,17 @@ struct CardHolderView: View {
         groupedHeaderTransitionGeneration += 1
         let generation = groupedHeaderTransitionGeneration
         suppressGroupedContentAnimation = true
+        groupedHeaderTransitionActive = true
 
         DispatchQueue.main.async {
             guard groupedHeaderTransitionGeneration == generation else { return }
             suppressGroupedContentAnimation = false
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+            guard groupedHeaderTransitionGeneration == generation else { return }
+            delayedGroupedHeaderTitles = []
+            groupedHeaderTransitionActive = false
         }
 
         guard mode != .list, item != .list else {
@@ -1196,15 +1874,13 @@ struct CardHolderView: View {
         let newTitles = Set(groupedCards(for: item).map(\.title))
         delayedGroupedHeaderTitles = newTitles.subtracting(oldTitles)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
-            guard groupedHeaderTransitionGeneration == generation else { return }
-            delayedGroupedHeaderTitles = []
-        }
     }
 
     private func updateSelectedMode(_ item: HolderMode) {
         withAnimation(.snappy(duration: 0.28)) {
             mode = item
+            isMultiSelecting = false
+            selectedCardIDs.removeAll()
             expandedCardID = nil
             expandedListID = nil
             revealedDeleteCardID = nil
@@ -1217,6 +1893,54 @@ struct CardHolderView: View {
             collapsedDragSourceScrollOffsetY = nil
             listScrollRequest = nil
             ignoreListRowGesturesUntil = .distantPast
+        }
+    }
+
+    private func enterMultiSelection() {
+        guard mode == .list, !isMultiSelecting else { return }
+        clearListDragTracking()
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            isMultiSelecting = true
+            selectedCardIDs.removeAll()
+            expandedCardID = nil
+            revealedDeleteCardID = nil
+            isContextMenuVisible = false
+            listContextMenuListID = nil
+            listContextMenuRowID = nil
+            dropTargetListRowID = nil
+        }
+    }
+
+    private func cancelCardSelection() {
+        guard isMultiSelecting, !selectedCardIDs.isEmpty else { return }
+        withAnimation(.snappy(duration: 0.18)) {
+            selectedCardIDs.removeAll()
+        }
+    }
+
+    private func exitMultiSelection() {
+        guard isMultiSelecting || !selectedCardIDs.isEmpty else { return }
+        let update = {
+            isMultiSelecting = false
+            selectedCardIDs.removeAll()
+        }
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction, update)
+    }
+
+    private func toggleCardSelection(_ cardID: UUID) {
+        guard isMultiSelecting else { return }
+        withAnimation(.snappy(duration: 0.18)) {
+            if selectedCardIDs.contains(cardID) {
+                selectedCardIDs.remove(cardID)
+            } else {
+                selectedCardIDs.insert(cardID)
+            }
         }
     }
 
@@ -1276,6 +2000,9 @@ struct CardHolderView: View {
             dropTargetListRowID = nil
         }
         cardPendingDeletionID = card.id
+        if !confirmsCardDeletion {
+            deletePendingCard()
+        }
     }
 
     private func deletePendingCard() {
@@ -1309,9 +2036,15 @@ struct CardHolderView: View {
         self.cardPendingDeletionID = nil
     }
 
-    private func toggleListRow(_ row: HolderListRow, scrollProxy: ScrollViewProxy) {
+    private func toggleListRow(_ row: HolderListRow) {
         clearListDragTracking()
         let isCollapsing = expandedListID == row.id
+
+        if isCollapsing {
+            resetHeaderDirectionTracking()
+            setHeaderCollapseOffset(0, animated: !accessibilityReduceMotion)
+            listScrollRequest = ListScrollRequest(target: .offset(0))
+        }
 
         withAnimation(.snappy(duration: 0.28)) {
             expandedCardID = nil
@@ -1319,20 +2052,12 @@ struct CardHolderView: View {
             listContextMenuListID = nil
             expandedListID = isCollapsing ? nil : row.id
         }
-
-        if isCollapsing {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
-                withAnimation(.snappy(duration: 0.28)) {
-                    scrollProxy.scrollTo(row.id, anchor: .top)
-                }
-            }
-        }
     }
 
     private var listContextMenuCenterY: CGFloat {
         guard
             let rowID = listContextMenuRowID,
-            let rowFrame = listModeRowFrames[rowID]
+            let rowFrame = geometryFrameStore.listRowFrames[rowID]
         else {
             return 302
         }
@@ -1347,7 +2072,7 @@ struct CardHolderView: View {
         guard let listID = row.listID else { return }
         clearListDragTracking()
 
-        if let rowFrame = listModeRowFrames[row.id],
+        if let rowFrame = geometryFrameStore.listRowFrames[row.id],
            rowFrame.maxY + listContextMenuGap + listContextMenuHeight > CardaTheme.canvasHeight - 16 {
             withAnimation(.snappy(duration: 0.24)) {
                 scrollProxy.scrollTo(row.id, anchor: .top)
@@ -1371,42 +2096,45 @@ struct CardHolderView: View {
         }
     }
 
-    private func moveDraggedCard(with payloads: [String], to row: HolderListRow) -> Bool {
-        guard
-            let cardID = payloads.compactMap({ UUID(uuidString: $0) }).first,
-            let card = cards.first(where: { $0.id == cardID })
-        else {
+    private func moveDraggedCards(with payloads: [String], to row: HolderListRow) -> Bool {
+        var seenCardIDs: Set<UUID> = []
+        let draggedCards = payloads
+            .compactMap(UUID.init(uuidString:))
+            .filter { seenCardIDs.insert($0).inserted }
+            .compactMap { cardID in
+                cards.first { $0.id == cardID }
+            }
+
+        guard !draggedCards.isEmpty else {
             restoreCollapsedDragSourceListIfNeeded()
             return false
         }
 
-        return move(card, to: row)
+        return move(draggedCards, to: row)
     }
 
-    private func move(_ card: BusinessCard, to row: HolderListRow) -> Bool {
-        let sourceListID = card.cardListID
+    private func move(_ draggedCards: [BusinessCard], to row: HolderListRow) -> Bool {
         let targetListID = row.listID
-        let sourceRowID = listRowID(for: card)
-        let sourceRemainingCount = (listRows.first { $0.id == sourceRowID }?.cards.count ?? 1) - 1
+        let cardsToMove = draggedCards.filter { $0.cardListID != targetListID }
         dropTargetListRowID = nil
 
-        guard sourceListID != targetListID else {
+        guard !cardsToMove.isEmpty else {
             restoreCollapsedDragSourceListIfNeeded()
             return true
         }
 
         let now = Date()
-        let affectedListIDs = Set([sourceListID, targetListID].compactMap { $0 })
+        let affectedListIDs = Set(
+            cardsToMove.compactMap(\.cardListID) + [targetListID].compactMap { $0 }
+        )
 
         withAnimation(.snappy(duration: 0.24)) {
             expandedCardID = nil
             isContextMenuVisible = false
             listContextMenuListID = nil
-            card.cardListID = targetListID
-            card.updatedAt = now
-
-            if expandedListID == sourceRowID && sourceRemainingCount <= 0 {
-                expandedListID = nil
+            for card in cardsToMove {
+                card.cardListID = targetListID
+                card.updatedAt = now
             }
         }
 
@@ -1423,6 +2151,10 @@ struct CardHolderView: View {
             return true
         }
 
+        let movedCardIDs = Set(cardsToMove.map(\.id))
+        withAnimation(.snappy(duration: 0.18)) {
+            selectedCardIDs.subtract(movedCardIDs)
+        }
         clearListDragStateAfterSuccessfulMove()
         return true
     }
@@ -1447,8 +2179,45 @@ private enum ListScrollTarget: Equatable {
     case offset(CGFloat)
 }
 
+private struct MultiSelectionCheckBadge: View {
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.cardaReduceMotion) private var settingsReduceMotion
+
+    let isVisible: Bool
+
+    private var accessibilityReduceMotion: Bool {
+        systemReduceMotion || settingsReduceMotion
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(CardaTheme.systemSelectionGreen)
+                .shadow(color: .black.opacity(0.12), radius: 2, x: 0, y: 1)
+
+            Image(systemName: "checkmark")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Color.white)
+        }
+        .scaleEffect(isVisible ? 1 : 0.72)
+        .offset(y: isVisible ? 0 : -2)
+        .opacity(isVisible ? 1 : 0)
+        .animation(
+            accessibilityReduceMotion
+                ? nil
+                : .spring(duration: 0.22, bounce: 0.28),
+            value: isVisible
+        )
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 private struct ListCardDragSource: UIViewRepresentable {
     let data: CardRenderData
+    let dragItems: [CardRenderData]
+    let isMultiSelecting: Bool
+    let isSelected: Bool
     let onTap: () -> Void
     let onDragBegan: () -> Void
     let onDragEnded: () -> Void
@@ -1456,6 +2225,8 @@ private struct ListCardDragSource: UIViewRepresentable {
     func makeCoordinator() -> Coordinator {
         Coordinator(
             data: data,
+            dragItems: dragItems,
+            isMultiSelecting: isMultiSelecting,
             onTap: onTap,
             onDragBegan: onDragBegan,
             onDragEnded: onDragEnded
@@ -1468,6 +2239,7 @@ private struct ListCardDragSource: UIViewRepresentable {
         view.layer.cornerRadius = 30
         view.layer.cornerCurve = .circular
         view.clipsToBounds = true
+        view.isAccessibilityElement = true
 
         let tapGesture = UITapGestureRecognizer(
             target: context.coordinator,
@@ -1485,24 +2257,45 @@ private struct ListCardDragSource: UIViewRepresentable {
 
     func updateUIView(_ uiView: UIView, context: Context) {
         context.coordinator.data = data
+        context.coordinator.dragItems = dragItems
+        context.coordinator.isMultiSelecting = isMultiSelecting
         context.coordinator.onTap = onTap
         context.coordinator.onDragBegan = onDragBegan
         context.coordinator.onDragEnded = onDragEnded
+
+        uiView.accessibilityLabel = data.displayName
+        uiView.accessibilityValue = isMultiSelecting
+            ? isSelected ? "已选择" : "未选择"
+            : nil
+        uiView.accessibilityIdentifier = isMultiSelecting
+            ? "cardHolder.multiSelect.card.\(data.id.uuidString)"
+            : nil
+        var accessibilityTraits: UIAccessibilityTraits = .button
+        if isSelected {
+            accessibilityTraits.insert(.selected)
+        }
+        uiView.accessibilityTraits = accessibilityTraits
     }
 
     final class Coordinator: NSObject, UIDragInteractionDelegate {
         var data: CardRenderData
+        var dragItems: [CardRenderData]
+        var isMultiSelecting: Bool
         var onTap: () -> Void
         var onDragBegan: () -> Void
         var onDragEnded: () -> Void
 
         init(
             data: CardRenderData,
+            dragItems: [CardRenderData],
+            isMultiSelecting: Bool,
             onTap: @escaping () -> Void,
             onDragBegan: @escaping () -> Void,
             onDragEnded: @escaping () -> Void
         ) {
             self.data = data
+            self.dragItems = dragItems
+            self.isMultiSelecting = isMultiSelecting
             self.onTap = onTap
             self.onDragBegan = onDragBegan
             self.onDragEnded = onDragEnded
@@ -1516,18 +2309,27 @@ private struct ListCardDragSource: UIViewRepresentable {
             _ interaction: UIDragInteraction,
             itemsForBeginning session: UIDragSession
         ) -> [UIDragItem] {
+            guard !dragItems.isEmpty else { return [] }
             onDragBegan()
 
-            let itemProvider = NSItemProvider(object: data.id.uuidString as NSString)
-            let item = UIDragItem(itemProvider: itemProvider)
-            item.localObject = data.id
-            item.previewProvider = { [data] in
-                UIDragPreview(
-                    view: Self.previewView(for: data),
-                    parameters: Self.previewParameters()
+            let showsSelectionBadge = isMultiSelecting
+            return dragItems.map { dragData in
+                let itemProvider = NSItemProvider(
+                    object: dragData.id.uuidString as NSString
                 )
+                let item = UIDragItem(itemProvider: itemProvider)
+                item.localObject = dragData.id
+                item.previewProvider = {
+                    UIDragPreview(
+                        view: Self.previewView(
+                            for: dragData,
+                            showsSelectionBadge: showsSelectionBadge
+                        ),
+                        parameters: Self.previewParameters()
+                    )
+                }
+                return item
             }
-            return [item]
         }
 
         func dragInteraction(
@@ -1536,8 +2338,17 @@ private struct ListCardDragSource: UIViewRepresentable {
             session: UIDragSession
         ) -> UITargetedDragPreview? {
             guard let sourceView = interaction.view else { return nil }
+            guard
+                let itemID = item.localObject as? UUID,
+                let itemData = dragItems.first(where: { $0.id == itemID })
+            else {
+                return nil
+            }
 
-            let preview = Self.previewView(for: data)
+            let preview = Self.previewView(
+                for: itemData,
+                showsSelectionBadge: isMultiSelecting
+            )
             let target = UIDragPreviewTarget(
                 container: sourceView,
                 center: CGPoint(
@@ -1551,6 +2362,20 @@ private struct ListCardDragSource: UIViewRepresentable {
                 parameters: Self.previewParameters(),
                 target: target
             )
+        }
+
+        func dragInteraction(
+            _ interaction: UIDragInteraction,
+            prefersFullSizePreviewsFor session: UIDragSession
+        ) -> Bool {
+            true
+        }
+
+        func dragInteraction(
+            _ interaction: UIDragInteraction,
+            sessionIsRestrictedToDraggingApplication session: UIDragSession
+        ) -> Bool {
+            true
         }
 
         func dragInteraction(
@@ -1571,7 +2396,10 @@ private struct ListCardDragSource: UIViewRepresentable {
             return parameters
         }
 
-        private static func previewView(for data: CardRenderData) -> UIView {
+        private static func previewView(
+            for data: CardRenderData,
+            showsSelectionBadge: Bool
+        ) -> UIView {
             let preview = UIView(frame: CGRect(x: 0, y: 0, width: 370, height: 60))
             preview.backgroundColor = .white
             preview.layer.cornerRadius = 30
@@ -1609,6 +2437,36 @@ private struct ListCardDragSource: UIViewRepresentable {
                 avatarView.layer.cornerRadius = 22
                 avatarView.clipsToBounds = true
                 preview.addSubview(avatarView)
+            }
+
+            if showsSelectionBadge {
+                let badge = UIView(frame: CGRect(x: 344, y: 0, width: 26, height: 26))
+                badge.backgroundColor = UIColor(
+                    red: 52 / 255,
+                    green: 199 / 255,
+                    blue: 89 / 255,
+                    alpha: 1
+                )
+                badge.layer.cornerRadius = 13
+                badge.layer.shadowColor = UIColor.black.cgColor
+                badge.layer.shadowOpacity = 0.12
+                badge.layer.shadowRadius = 2
+                badge.layer.shadowOffset = CGSize(width: 0, height: 1)
+
+                let checkmark = UIImageView(
+                    frame: CGRect(x: 6, y: 6, width: 14, height: 14)
+                )
+                checkmark.image = UIImage(
+                    systemName: "checkmark",
+                    withConfiguration: UIImage.SymbolConfiguration(
+                        pointSize: 12,
+                        weight: .bold
+                    )
+                )
+                checkmark.tintColor = .white
+                checkmark.contentMode = .scaleAspectFit
+                badge.addSubview(checkmark)
+                preview.addSubview(badge)
             }
 
             return preview
@@ -1882,7 +2740,7 @@ struct HolderModeTabsBackground: View {
             .offset(x: frame.x, y: frame.y)
     }
 
-    private func modeTabFrame(
+    fileprivate func modeTabFrame(
         for item: HolderMode
     ) -> (x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) {
         switch item {
@@ -1901,7 +2759,7 @@ struct HolderModeTabsBackground: View {
         }
     }
 
-    private func modeTabShape(for item: HolderMode) -> HolderModeTabShape {
+    fileprivate func modeTabShape(for item: HolderMode) -> HolderModeTabShape {
         switch (mode, item) {
         case (.list, .name):
             return HolderModeTabShape(style: .middleTailRight)
@@ -2038,18 +2896,19 @@ private struct SwipeToDeleteCardContainer<Content: View>: View {
     let cardID: UUID
     let height: CGFloat
     @Binding var revealedCardID: UUID?
+    let isSwipeEnabled: Bool
     let onDelete: () -> Void
     let content: Content
 
     @State private var offsetX: CGFloat = 0
     @State private var dragStartOffsetX: CGFloat?
-    @State private var isDeleteRevealDragActive: Bool?
 
     private let revealDistance: CGFloat = 70
     private let expandedButtonWidth: CGFloat = 60
     private let expandedButtonVerticalInset: CGFloat = 15
     private let collapsedButtonSize: CGFloat = 52
     private let collapsedButtonCenterX: CGFloat = 356
+    private let expandedDeleteIconSize: CGFloat = 28 * 0.8
 
     private var isDeleteButtonVisible: Bool {
         revealedCardID == cardID
@@ -2059,16 +2918,24 @@ private struct SwipeToDeleteCardContainer<Content: View>: View {
         height == 60
     }
 
+    private var deleteRevealProgress: Double {
+        guard isSwipeEnabled else { return 0 }
+        let progress = min(max(-offsetX / revealDistance, 0), 1)
+        return Double(progress)
+    }
+
     init(
         cardID: UUID,
         height: CGFloat,
         revealedCardID: Binding<UUID?>,
+        isSwipeEnabled: Bool = true,
         onDelete: @escaping () -> Void,
         @ViewBuilder content: () -> Content
     ) {
         self.cardID = cardID
         self.height = height
         self._revealedCardID = revealedCardID
+        self.isSwipeEnabled = isSwipeEnabled
         self.onDelete = onDelete
         self.content = content()
     }
@@ -2084,14 +2951,14 @@ private struct SwipeToDeleteCardContainer<Content: View>: View {
                         ? (height - collapsedButtonSize) / 2
                         : expandedButtonVerticalInset
                 )
-                .opacity(isDeleteButtonVisible ? 1 : 0)
-                .allowsHitTesting(isDeleteButtonVisible)
-                .accessibilityHidden(!isDeleteButtonVisible)
+                .opacity(deleteRevealProgress)
+                .allowsHitTesting(isDeleteButtonVisible && isSwipeEnabled)
+                .accessibilityHidden(!isDeleteButtonVisible || !isSwipeEnabled)
 
             content
                 .frame(width: CardaTheme.cardWidth, height: height)
                 .offset(x: 16 + offsetX)
-                .simultaneousGesture(deleteRevealGesture)
+                .gesture(deleteRevealGesture)
         }
         .frame(width: CardaTheme.canvasWidth, height: height, alignment: .topLeading)
         .clipped()
@@ -2100,6 +2967,10 @@ private struct SwipeToDeleteCardContainer<Content: View>: View {
             withAnimation(.snappy(duration: 0.22)) {
                 offsetX = 0
             }
+        }
+        .onChange(of: isSwipeEnabled) { _, isEnabled in
+            guard !isEnabled, offsetX != 0 else { return }
+            offsetX = 0
         }
     }
 
@@ -2123,8 +2994,8 @@ private struct SwipeToDeleteCardContainer<Content: View>: View {
                         fileName: isCollapsedCard ? "Trash 3" : "Trash 2"
                     )
                     .frame(
-                        width: isCollapsedCard ? 22 : 28,
-                        height: isCollapsedCard ? 22 : 28
+                        width: isCollapsedCard ? 22 : expandedDeleteIconSize,
+                        height: isCollapsedCard ? 22 : expandedDeleteIconSize
                     )
                 }
         }
@@ -2132,44 +3003,134 @@ private struct SwipeToDeleteCardContainer<Content: View>: View {
         .accessibilityLabel("删除名片")
     }
 
-    private var deleteRevealGesture: some Gesture {
-        DragGesture(minimumDistance: 12, coordinateSpace: .local)
-            .onChanged { value in
-                if isDeleteRevealDragActive == nil {
-                    isDeleteRevealDragActive = abs(value.translation.width) > abs(value.translation.height)
-                    if isDeleteRevealDragActive == true,
-                       value.translation.width < 0,
-                       revealedCardID != cardID {
+    private var deleteRevealGesture: HorizontalCardSwipeGesture {
+        HorizontalCardSwipeGesture(
+            isEnabled: isSwipeEnabled,
+            onChanged: { translationX in
+                if dragStartOffsetX == nil {
+                    dragStartOffsetX = offsetX
+                    if translationX < 0, revealedCardID != cardID {
                         withAnimation(.snappy(duration: 0.22)) {
                             revealedCardID = nil
                         }
                     }
                 }
-                guard isDeleteRevealDragActive == true else { return }
 
                 let startOffset = dragStartOffsetX ?? offsetX
-                if dragStartOffsetX == nil {
-                    dragStartOffsetX = startOffset
-                }
-                let proposedOffset = value.translation.width + startOffset
-                let clampedOffset = min(0, max(-revealDistance, proposedOffset))
-                offsetX = clampedOffset
-            }
-            .onEnded { value in
-                let shouldReveal = offsetX < -revealDistance * 0.45 || value.predictedEndTranslation.width < -revealDistance
+                let proposedOffset = translationX + startOffset
+                offsetX = min(0, max(-revealDistance, proposedOffset))
+            },
+            onEnded: { predictedTranslationX, wasCancelled in
+                let shouldReveal = !wasCancelled
+                    && (offsetX < -revealDistance * 0.45 || predictedTranslationX < -revealDistance)
                 withAnimation(.snappy(duration: 0.22)) {
                     revealedCardID = shouldReveal ? cardID : nil
                     offsetX = shouldReveal ? -revealDistance : 0
                 }
                 dragStartOffsetX = nil
-                isDeleteRevealDragActive = nil
             }
+        )
     }
 }
 
-private struct GroupedHeaderAnchor {
+/// Locks the row action to a horizontal pan before recognition begins. A SwiftUI
+/// `DragGesture` only knows the axis after it has already joined gesture resolution,
+/// which can intermittently delay the parent `ScrollView` when a vertical drag starts
+/// on a card row.
+private struct HorizontalCardSwipeGesture: UIGestureRecognizerRepresentable {
+    let isEnabled: Bool
+    let onChanged: (CGFloat) -> Void
+    let onEnded: (CGFloat, Bool) -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
+        Coordinator(isEnabled: isEnabled)
+    }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let recognizer = UIPanGestureRecognizer()
+        recognizer.cancelsTouchesInView = false
+        recognizer.maximumNumberOfTouches = 1
+        recognizer.delegate = context.coordinator
+        recognizer.isEnabled = isEnabled
+        return recognizer
+    }
+
+    func updateUIGestureRecognizer(
+        _ recognizer: UIPanGestureRecognizer,
+        context: Context
+    ) {
+        context.coordinator.isEnabled = isEnabled
+        recognizer.isEnabled = isEnabled
+    }
+
+    func handleUIGestureRecognizerAction(
+        _ recognizer: UIPanGestureRecognizer,
+        context: Context
+    ) {
+        let translationX = recognizer.translation(in: recognizer.view).x
+
+        switch recognizer.state {
+        case .began, .changed:
+            onChanged(translationX)
+        case .ended:
+            let projectedTranslationX = translationX
+                + recognizer.velocity(in: recognizer.view).x * 0.2
+            onEnded(projectedTranslationX, false)
+        case .cancelled, .failed:
+            onEnded(translationX, true)
+        default:
+            break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        private let horizontalDominanceRatio: CGFloat = 1.35
+        var isEnabled: Bool
+
+        init(isEnabled: Bool) {
+            self.isEnabled = isEnabled
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard isEnabled else { return false }
+            guard let panGesture = gestureRecognizer as? UIPanGestureRecognizer else {
+                return false
+            }
+            let velocity = panGesture.velocity(in: panGesture.view)
+            return abs(velocity.x) > abs(velocity.y) * horizontalDominanceRatio
+        }
+    }
+}
+
+private struct GroupedHeaderAnchor: Identifiable {
+    let mode: HolderMode
     let title: String
     let bounds: Anchor<CGRect>
+
+    var id: String { "\(mode.rawValue):\(title)" }
+}
+
+private struct ListStickyHeader<Content: View>: View {
+    let backgroundColor: Color
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        content()
+        .frame(width: CardaTheme.canvasWidth, alignment: .topLeading)
+        .background(backgroundColor)
+    }
+}
+
+private struct ListStickyHeaderMask: View {
+    let height: CGFloat
+    let backgroundColor: Color
+
+    var body: some View {
+        Rectangle()
+            .fill(backgroundColor)
+            .frame(width: CardaTheme.canvasWidth, height: height)
+            .accessibilityHidden(true)
+    }
 }
 
 private struct GroupedHeaderAnchorPreferenceKey: PreferenceKey {
@@ -2179,7 +3140,493 @@ private struct GroupedHeaderAnchorPreferenceKey: PreferenceKey {
         value: inout [GroupedHeaderAnchor],
         nextValue: () -> [GroupedHeaderAnchor]
     ) {
-        value.append(contentsOf: nextValue())
+        StableIdentityReducer.merge(
+            into: &value,
+            next: nextValue(),
+            id: { $0.id }
+        )
+    }
+}
+
+private struct PinnedHeaderRetentionObserver: View {
+    let value: String?
+    let onChange: (String?) -> Void
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onAppear {
+                onChange(value)
+            }
+            .onChange(of: value) { _, newValue in
+                onChange(newValue)
+            }
+    }
+}
+
+/// Observes the UIScrollView's existing pan recognizer without installing a
+/// competing gesture. Per-frame finger deltas are the sole header-direction
+/// source, so layout changes, deceleration and elastic rebound cannot reverse it.
+private struct ScrollViewPanObserver: UIViewRepresentable {
+    let generation: Int
+    let onChanged: (CGSize) -> Void
+    let onEnded: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            generation: generation,
+            onChanged: onChanged,
+            onEnded: onEnded
+        )
+    }
+
+    func makeUIView(context: Context) -> AttachmentView {
+        let view = AttachmentView(frame: .zero)
+        view.isUserInteractionEnabled = false
+        view.onHierarchyChange = { [weak view, weak coordinator = context.coordinator] in
+            guard let view, let coordinator else { return }
+            coordinator.attachIfNeeded(from: view)
+        }
+        DispatchQueue.main.async {
+            context.coordinator.attachIfNeeded(from: view)
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: AttachmentView, context: Context) {
+        context.coordinator.updateGeneration(generation)
+        context.coordinator.onChanged = onChanged
+        context.coordinator.onEnded = onEnded
+        DispatchQueue.main.async {
+            context.coordinator.attachIfNeeded(from: uiView)
+        }
+    }
+
+    final class AttachmentView: UIView {
+        var onHierarchyChange: (() -> Void)?
+
+        override func didMoveToSuperview() {
+            super.didMoveToSuperview()
+            onHierarchyChange?()
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            onHierarchyChange?()
+        }
+    }
+
+    final class Coordinator: NSObject {
+        var onChanged: (CGSize) -> Void
+        var onEnded: () -> Void
+        private var generationGate: InteractionGenerationGate
+        private weak var panGestureRecognizer: UIPanGestureRecognizer?
+        private var previousTranslation: CGPoint = .zero
+
+        init(
+            generation: Int,
+            onChanged: @escaping (CGSize) -> Void,
+            onEnded: @escaping () -> Void
+        ) {
+            generationGate = InteractionGenerationGate(
+                currentGeneration: generation
+            )
+            self.onChanged = onChanged
+            self.onEnded = onEnded
+        }
+
+        func updateGeneration(_ generation: Int) {
+            generationGate.updateCurrentGeneration(generation)
+        }
+
+        deinit {
+            panGestureRecognizer?.removeTarget(
+                self,
+                action: #selector(handlePan(_:))
+            )
+        }
+
+        func attachIfNeeded(from view: UIView) {
+            var ancestor = view.superview
+            while let current = ancestor {
+                if let scrollView = current as? UIScrollView {
+                    let pan = scrollView.panGestureRecognizer
+                    guard panGestureRecognizer !== pan else { return }
+                    panGestureRecognizer?.removeTarget(
+                        self,
+                        action: #selector(handlePan(_:))
+                    )
+                    panGestureRecognizer = pan
+                    pan.addTarget(self, action: #selector(handlePan(_:)))
+                    return
+                }
+                ancestor = current.superview
+            }
+        }
+
+        @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            let point = recognizer.translation(in: recognizer.view)
+            switch recognizer.state {
+            case .began:
+                generationGate.beginGesture()
+                previousTranslation = point
+            case .changed:
+                let delta = CGSize(
+                    width: point.x - previousTranslation.x,
+                    height: point.y - previousTranslation.y
+                )
+                previousTranslation = point
+                guard generationGate.acceptsCurrentGestureEvent() else { return }
+                if abs(delta.width) > 0.01 || abs(delta.height) > 0.01 {
+                    onChanged(delta)
+                }
+            case .ended, .cancelled, .failed:
+                let shouldNotify = generationGate.endGesture()
+                if shouldNotify {
+                    onEnded()
+                }
+                previousTranslation = .zero
+            default:
+                break
+            }
+        }
+    }
+}
+
+/// Keeps the high-frequency collapse observation at the modifier boundary so a
+/// 0.333pt scroll tick does not rebuild the complete card/list hierarchy.
+private struct CardHolderCollapseTranslationModifier: ViewModifier {
+    let collapseState: CardHolderHeaderCollapseState
+    let expandedY: CGFloat
+    let maximumOffset: CGFloat
+
+    private var collapseOffset: CGFloat {
+        min(max(collapseState.offset, 0), maximumOffset)
+    }
+
+    func body(content: Content) -> some View {
+        content.offset(y: expandedY - collapseOffset)
+    }
+}
+
+private struct MorphingCardHolderListLabel: View {
+    let text: String
+    let spreadProgress: CGFloat
+    let revealProgress: CGFloat
+
+    private var characters: [Character] {
+        Array(text)
+    }
+
+    var body: some View {
+        let spread = min(max(spreadProgress, 0), 1)
+        let reveal = min(max(revealProgress, 0), 1)
+        let characterWidth: CGFloat = 17
+        let finalWidth = characterWidth * CGFloat(characters.count)
+        let centerX = finalWidth / 2
+
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(characters.enumerated()), id: \.offset) { index, character in
+                let finalCenterX = characterWidth * (CGFloat(index) + 0.5)
+                Text(String(character))
+                    .font(CardaTheme.pingFang(size: 17, weight: .medium))
+                    .foregroundStyle(Color.black)
+                    .lineLimit(1)
+                    .frame(width: characterWidth, height: 22, alignment: .center)
+                    .position(
+                        x: centerX + (finalCenterX - centerX) * spread,
+                        y: 11
+                    )
+            }
+        }
+        .frame(width: finalWidth, height: 22, alignment: .topLeading)
+        .compositingGroup()
+        .blur(radius: 15 * (1 - reveal))
+        .opacity(Double(reveal))
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct CardHolderAvatarMorphModifier: AnimatableModifier {
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    private var clampedProgress: CGFloat {
+        min(max(progress, 0), 1)
+    }
+
+    private var imageOpacity: Double {
+        let progress = clampedProgress
+        if progress <= 0.5 {
+            return Double(1 - 0.8 * (progress / 0.5))
+        }
+        return Double(0.2 * (1 - (progress - 0.5) / 0.5))
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(1 + 0.08 * clampedProgress)
+            .blur(radius: 15 * clampedProgress)
+            .opacity(imageOpacity)
+    }
+}
+
+private struct CardHolderHeaderChromeModifier: ViewModifier {
+    let collapseState: CardHolderHeaderCollapseState
+    let maximumOffset: CGFloat
+    let clipTop: CGFloat
+
+    private var collapseOffset: CGFloat {
+        min(max(collapseState.offset, 0), maximumOffset)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .offset(y: -collapseOffset)
+            .frame(
+                width: CardaTheme.canvasWidth,
+                height: CardaTheme.canvasHeight,
+                alignment: .topLeading
+            )
+            .mask(alignment: .topLeading) {
+                VStack(spacing: 0) {
+                    LinearGradient(
+                        stops: [
+                            Gradient.Stop(color: .clear, location: 0),
+                            Gradient.Stop(color: .black.opacity(0.18), location: 0.35),
+                            Gradient.Stop(color: .black.opacity(0.72), location: 0.75),
+                            Gradient.Stop(color: .black, location: 1)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: clipTop)
+
+                    Rectangle()
+                        .fill(Color.black)
+                        .frame(height: CardaTheme.canvasHeight - clipTop)
+                }
+                .frame(
+                    width: CardaTheme.canvasWidth,
+                    height: CardaTheme.canvasHeight,
+                    alignment: .topLeading
+                )
+            }
+            .allowsHitTesting(collapseOffset < maximumOffset - 0.5)
+    }
+}
+
+private struct CardHolderHeaderTextOpacityModifier: ViewModifier {
+    let collapseState: CardHolderHeaderCollapseState
+    let maximumOffset: CGFloat
+
+    func body(content: Content) -> some View {
+        content.modifier(
+            CardHolderHeaderTextAnimatableOpacityModifier(
+                collapseOffset: collapseState.offset,
+                maximumOffset: maximumOffset
+            )
+        )
+    }
+}
+
+/// Interpolates the collapse offset itself and derives opacity from that single
+/// presentation value. A regular `opacity` animation only receives the binary
+/// endpoint and can retain a stale presentation alpha when rapid reverse pans
+/// repeatedly interrupt it.
+private struct CardHolderHeaderTextAnimatableOpacityModifier: AnimatableModifier {
+    var collapseOffset: CGFloat
+    let maximumOffset: CGFloat
+
+    var animatableData: CGFloat {
+        get { collapseOffset }
+        set { collapseOffset = newValue }
+    }
+
+    private var opacity: Double {
+        guard maximumOffset > 0 else { return 1 }
+        let progress = min(max(collapseOffset / maximumOffset, 0), 1)
+        let fadeProgress = min(max((progress - 0.5) / 0.5, 0), 1)
+        return Double(1 - fadeProgress)
+    }
+
+    func body(content: Content) -> some View {
+        content.opacity(opacity)
+    }
+}
+
+/// Scroll callbacks run at display cadence. Keeping offsets and pan-direction
+/// thresholds in a reference store prevents bookkeeping writes from invalidating
+/// the complete card-holder view hierarchy.
+@MainActor
+private final class HolderScrollRuntime {
+    var groupedOffsetY: CGFloat = 0
+    var listOffsetY: CGFloat = 0
+    var direction: HolderHeaderScrollDirection?
+    var pendingDirection: HolderHeaderScrollDirection?
+    var pendingDistance: CGFloat = 0
+}
+
+/// Geometry is only consumed after a long press or drop begins. Storing every
+/// scrolling frame in `@State` previously caused a broad invalidation storm.
+@MainActor
+private final class HolderGeometryFrameStore {
+    var cardFrames: [UUID: CGRect] = [:]
+    var listRowFrames: [String: CGRect] = [:]
+}
+
+private struct HolderCardGroupingCacheKey: Equatable {
+    let id: UUID
+    let name: String
+    let organizationName: String
+}
+
+private struct HolderCardListCacheKey: Equatable {
+    let id: UUID
+    let cardListID: UUID?
+    let createdAt: Date
+}
+
+private struct HolderListCacheKey: Equatable {
+    let id: UUID
+    let name: String
+    let sortOrder: Int
+    let createdAt: Date
+}
+
+/// Pinyin conversion and grouping are deliberately memoized outside `body` and
+/// Anchor Preference resolution. Those paths execute repeatedly while scrolling.
+@MainActor
+private final class HolderDerivedDataCache {
+    private var groupingKey: [HolderCardGroupingCacheKey] = []
+    private var nameSections: [GroupedCardSection] = []
+    private var organizationSections: [GroupedCardSection] = []
+    private var cardListKey: [HolderCardListCacheKey] = []
+    private var listKey: [HolderListCacheKey] = []
+    private var cachedListRows: [HolderListRow] = []
+
+    func groupedCards(
+        for mode: HolderMode,
+        cards: [BusinessCard]
+    ) -> [GroupedCardSection] {
+        guard mode != .list else { return [] }
+        updateGroupedSectionsIfNeeded(cards: cards)
+        return mode == .name ? nameSections : organizationSections
+    }
+
+    func listRows(
+        cards: [BusinessCard],
+        lists: [BusinessCardList]
+    ) -> [HolderListRow] {
+        let nextCardKey = cards.map {
+            HolderCardListCacheKey(
+                id: $0.id,
+                cardListID: $0.cardListID,
+                createdAt: $0.createdAt
+            )
+        }
+        let nextListKey = lists.map {
+            HolderListCacheKey(
+                id: $0.id,
+                name: $0.name,
+                sortOrder: $0.sortOrder,
+                createdAt: $0.createdAt
+            )
+        }
+        guard nextCardKey != cardListKey || nextListKey != listKey else {
+            return cachedListRows
+        }
+
+        cardListKey = nextCardKey
+        listKey = nextListKey
+        let validListIDs = Set(lists.map(\.id))
+        let cardsByList = Dictionary(grouping: cards.compactMap { card -> (UUID, BusinessCard)? in
+            guard let cardListID = card.cardListID, validListIDs.contains(cardListID) else {
+                return nil
+            }
+            return (cardListID, card)
+        }, by: \.0)
+        let sortedLists = lists.sorted {
+            if $0.sortOrder == $1.sortOrder {
+                return $0.createdAt < $1.createdAt
+            }
+            return $0.sortOrder < $1.sortOrder
+        }
+        let assignedRows = sortedLists.map { list in
+            let assignedCards = (cardsByList[list.id] ?? [])
+                .map(\.1)
+                .sorted { $0.createdAt > $1.createdAt }
+            return HolderListRow(
+                id: list.id.uuidString,
+                listID: list.id,
+                title: "\(list.name)（\(assignedCards.count)）",
+                cards: assignedCards,
+                isUncategorized: false
+            )
+        }
+        let uncategorizedCards = cards
+            .filter { card in
+                guard let cardListID = card.cardListID else { return true }
+                return !validListIDs.contains(cardListID)
+            }
+            .sorted { $0.createdAt > $1.createdAt }
+        cachedListRows = assignedRows + [
+            HolderListRow(
+                id: "uncategorized",
+                listID: nil,
+                title: "未分类（\(uncategorizedCards.count)）",
+                cards: uncategorizedCards,
+                isUncategorized: true
+            )
+        ]
+        return cachedListRows
+    }
+
+    private func updateGroupedSectionsIfNeeded(cards: [BusinessCard]) {
+        let nextKey = cards.map {
+            HolderCardGroupingCacheKey(
+                id: $0.id,
+                name: $0.name,
+                organizationName: $0.organizationName
+            )
+        }
+        guard nextKey != groupingKey else { return }
+        groupingKey = nextKey
+
+        let records = cards.map(GroupedCardSortRecord.init(card:))
+        let nameSorted = records.sorted { $0.nameSortKey < $1.nameSortKey }
+        nameSections = Dictionary(grouping: nameSorted) { record in
+            pinyinInitial(forSortKey: record.nameSortKey)
+        }
+        .map { key, records in
+            GroupedCardSection(
+                title: key.isEmpty ? "#" : key,
+                cards: records.map(\.card)
+            )
+        }
+        .sorted { alphabetSectionComesBefore($0.title, $1.title) }
+
+        let organizationSorted = records.sorted { lhs, rhs in
+            if lhs.organizationSortKey == rhs.organizationSortKey {
+                return lhs.nameSortKey < rhs.nameSortKey
+            }
+            return lhs.organizationSortKey < rhs.organizationSortKey
+        }
+        organizationSections = Dictionary(grouping: organizationSorted) { record in
+            pinyinInitial(forSortKey: record.organizationSortKey)
+        }
+        .map { initial, records in
+            GroupedCardSection(
+                title: initial,
+                cards: records.map(\.card)
+            )
+        }
+        .sorted { alphabetSectionComesBefore($0.title, $1.title) }
     }
 }
 
@@ -2214,43 +3661,93 @@ private struct ContactAlphabetIndex: View {
     private let letterHeight: CGFloat = 13
     private let letterSpacing: CGFloat = 1
     private let indexHeight: CGFloat = 770
+    private let indicatorWidth: CGFloat = 69
+    private let indicatorHeight: CGFloat = 58
+    private let indicatorCenterX: CGFloat = -55.5
 
     @State private var lastDraggedLetter: String?
+    @State private var activeLetter: String?
+    @State private var activeLetterCenterY: CGFloat?
+    @State private var indicatorDismissGeneration = 0
+    @State private var suppressButtonSelection = false
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.cardaReduceMotion) private var settingsReduceMotion
+
+    private var accessibilityReduceMotion: Bool {
+        systemReduceMotion || settingsReduceMotion
+    }
 
     var body: some View {
-        VStack(spacing: 1) {
-            ForEach(letters, id: \.self) { letter in
-                Button {
-                    onSelect(letter)
-                } label: {
-                    Text(letter)
-                        .font(CardaTheme.sfPro(size: 11, weight: .semibold))
-                        .tracking(0.06)
-                        .foregroundStyle(Color.black)
-                        .frame(width: 22, height: letterHeight)
-                        .contentShape(Rectangle())
+        ZStack(alignment: .topLeading) {
+            VStack(spacing: letterSpacing) {
+                ForEach(letters, id: \.self) { letter in
+                    Button {
+                        guard !suppressButtonSelection else { return }
+                        select(letter, keepsIndicatorVisible: true)
+                    } label: {
+                        Text(letter)
+                            .font(CardaTheme.sfPro(size: 11, weight: .semibold))
+                            .tracking(0.06)
+                            .foregroundStyle(activeLetter == letter ? Color.white : Color.black)
+                            .frame(width: 22, height: letterHeight)
+                            .background {
+                                if activeLetter == letter {
+                                    Circle()
+                                        .fill(Color.black)
+                                        .frame(width: 14, height: 14)
+                                        .transition(.opacity)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("跳转到 \(letter)")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("跳转到 \(letter)")
+            }
+            .frame(width: 22, height: indexHeight, alignment: .center)
+
+            if let activeLetter, let activeLetterCenterY {
+                ContactAlphabetIndicator(letter: activeLetter)
+                    .frame(width: indicatorWidth, height: indicatorHeight)
+                    .position(x: indicatorCenterX, y: activeLetterCenterY)
+                    .transition(indicatorTransition)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
         }
-        .frame(width: 22, height: indexHeight, alignment: .center)
+        .frame(width: 22, height: indexHeight, alignment: .topLeading)
         .contentShape(Rectangle())
         .simultaneousGesture(
             DragGesture(minimumDistance: 0, coordinateSpace: .local)
                 .onChanged { value in
-                    guard let letter = letter(at: value.location.y) else { return }
-                    guard letter != lastDraggedLetter else { return }
-                    lastDraggedLetter = letter
-                    onSelect(letter)
+                    suppressButtonSelection = true
+                    cancelScheduledIndicatorDismissal()
+                    guard let selection = selection(at: value.location.y) else { return }
+
+                    showIndicator(for: selection.letter, centerY: selection.centerY)
+                    guard selection.letter != lastDraggedLetter else { return }
+                    lastDraggedLetter = selection.letter
+                    onSelect(selection.letter)
                 }
-                .onEnded { _ in
+                .onEnded { value in
                     lastDraggedLetter = nil
+                    let movement = hypot(value.translation.width, value.translation.height)
+                    scheduleIndicatorDismissal(after: movement > 4 ? 0.06 : 0.42)
+                    DispatchQueue.main.async {
+                        suppressButtonSelection = false
+                    }
                 }
         )
     }
 
-    private func letter(at y: CGFloat) -> String? {
+    private var indicatorTransition: AnyTransition {
+        if accessibilityReduceMotion {
+            return .opacity
+        }
+        return .opacity.combined(with: .scale(scale: 0.96, anchor: .trailing))
+    }
+
+    private func selection(at y: CGFloat) -> (letter: String, centerY: CGFloat)? {
         let contentHeight =
             CGFloat(letters.count) * letterHeight
             + CGFloat(letters.count - 1) * letterSpacing
@@ -2260,7 +3757,119 @@ private struct ContactAlphabetIndex: View {
 
         let rowHeight = letterHeight + letterSpacing
         let index = min(Int(relativeY / rowHeight), letters.count - 1)
-        return letters[index]
+        let centerY = contentTop + CGFloat(index) * rowHeight + letterHeight / 2
+        return (letters[index], centerY)
+    }
+
+    private func select(_ letter: String, keepsIndicatorVisible: Bool) {
+        guard let index = letters.firstIndex(of: letter) else { return }
+        let rowHeight = letterHeight + letterSpacing
+        let contentHeight =
+            CGFloat(letters.count) * letterHeight
+            + CGFloat(letters.count - 1) * letterSpacing
+        let centerY = (indexHeight - contentHeight) / 2
+            + CGFloat(index) * rowHeight
+            + letterHeight / 2
+
+        showIndicator(for: letter, centerY: centerY)
+        onSelect(letter)
+        if keepsIndicatorVisible {
+            scheduleIndicatorDismissal(after: 0.42)
+        }
+    }
+
+    private func showIndicator(for letter: String, centerY: CGFloat) {
+        if activeLetter == nil {
+            withAnimation(.easeOut(duration: 0.1)) {
+                activeLetter = letter
+                activeLetterCenterY = centerY
+            }
+        } else {
+            activeLetter = letter
+            activeLetterCenterY = centerY
+        }
+    }
+
+    private func cancelScheduledIndicatorDismissal() {
+        indicatorDismissGeneration += 1
+    }
+
+    private func scheduleIndicatorDismissal(after delay: TimeInterval) {
+        indicatorDismissGeneration += 1
+        let generation = indicatorDismissGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            guard generation == indicatorDismissGeneration else { return }
+            withAnimation(.easeOut(duration: 0.12)) {
+                activeLetter = nil
+                activeLetterCenterY = nil
+            }
+        }
+    }
+}
+
+private struct ContactAlphabetIndicator: View {
+    let letter: String
+
+    var body: some View {
+        ContactAlphabetIndicatorShape()
+            .fill(CardaTheme.alphabetIndexIndicatorFill)
+            .overlay(alignment: .topLeading) {
+                Text(letter)
+                    .font(CardaTheme.sfPro(size: 30, weight: .regular))
+                    .foregroundStyle(Color.white)
+                    .frame(width: 58, height: 58)
+                    .position(x: 29, y: 29)
+            }
+    }
+}
+
+private struct ContactAlphabetIndicatorShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(
+                x: rect.minX + x / 69 * rect.width,
+                y: rect.minY + y / 58 * rect.height
+            )
+        }
+
+        var path = Path()
+        path.move(to: point(30, 0))
+        path.addCurve(
+            to: point(0, 29),
+            control1: point(13, 0),
+            control2: point(0, 13)
+        )
+        path.addCurve(
+            to: point(30, 58),
+            control1: point(0, 45),
+            control2: point(13, 58)
+        )
+        path.addCurve(
+            to: point(52, 48),
+            control1: point(40, 58),
+            control2: point(46, 54)
+        )
+        path.addCurve(
+            to: point(68.5, 31),
+            control1: point(58, 41),
+            control2: point(64, 34)
+        )
+        path.addQuadCurve(
+            to: point(68.5, 27),
+            control: point(70.5, 29)
+        )
+        path.addCurve(
+            to: point(52, 10),
+            control1: point(64, 24),
+            control2: point(58, 17)
+        )
+        path.addCurve(
+            to: point(30, 0),
+            control1: point(46, 4),
+            control2: point(40, 0)
+        )
+        path.closeSubpath()
+        return path
     }
 }
 

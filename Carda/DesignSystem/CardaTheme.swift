@@ -1,6 +1,6 @@
 //
 //  CardaTheme.swift
-//  Carda
+//  Cardi
 //
 
 import SwiftUI
@@ -18,10 +18,12 @@ enum CardaTheme {
     static let myCardsBackground = searchBackground
     static let editorBackground = searchBackground
     static let editorFormFill = Color(red: 243 / 255, green: 243 / 255, blue: 243 / 255)
-    static let editorAvatarPlaceholder = Color(red: 89 / 255, green: 89 / 255, blue: 89 / 255)
+    static let alphabetIndexIndicatorFill = Color.black
     static let editorAddButtonFill = Color.white
     static let editorAddButtonGlyph = editorBackground
     static let mainAccent = Color(red: 0.996, green: 0.475, blue: 0.235)
+    static let systemSelectionBlue = Color(red: 0, green: 122 / 255, blue: 1)
+    static let systemSelectionGreen = Color(red: 52 / 255, green: 199 / 255, blue: 89 / 255)
     static let selectedTabFill = Color(red: 0.929, green: 0.929, blue: 0.929)
     static let primaryText = Color(red: 0.102, green: 0.102, blue: 0.102)
     static let secondaryText = Color.black.opacity(0.75)

@@ -1,6 +1,6 @@
 //
 //  TransparentGradientBlur.swift
-//  Carda
+//  Cardi
 //
 
 import SwiftUI
@@ -14,9 +14,15 @@ struct TransparentGradientBlur: View {
         case bottom
     }
 
+    enum MaterialStyle {
+        case chrome
+        case ultraThinLight
+    }
+
     var width: CGFloat = CardaTheme.canvasWidth
     var height: CGFloat = 140
     var direction: Direction = .bottom
+    var materialStyle: MaterialStyle = .chrome
     var tintColor: Color = CardaTheme.pageBackground
     var tintOpacity: Double = 0.5
     var matchesOpaqueEdgeColor = false
@@ -24,7 +30,7 @@ struct TransparentGradientBlur: View {
     var body: some View {
         ZStack {
             ZStack {
-                MaximumBackdropBlurMaterial()
+                MaximumBackdropBlurMaterial(style: materialStyle)
 
                 tintColor
                     .opacity(tintOpacity)
@@ -89,32 +95,90 @@ struct TransparentGradientBlur: View {
     }
 }
 
+/// A screen-positioned fallback for Figma's `Scroll Edge Effect - Soft`.
+///
+/// Cardi's card-holder scroll viewport deliberately extends below the canvas
+/// to keep its sticky-header geometry stable, which puts the native bottom
+/// scroll-edge effect off screen. This view preserves the Figma layer recipe
+/// without changing the scroll view's physical size or content geometry.
+struct FigmaScrollEdgeSoftOverlay: View {
+    var width: CGFloat = CardaTheme.canvasWidth
+    var height: CGFloat = 140
+    var direction: TransparentGradientBlur.Direction = .bottom
+
+    var body: some View {
+        ZStack {
+            // Figma outer progressive backdrop blur. Public UIKit does not
+            // expose an arbitrary blur radius, so the lighter system material
+            // supplies the soft 0 -> 10 transition through the alpha mask.
+            MaximumBackdropBlurMaterial(style: .ultraThinLight)
+
+            // Figma child "Blur": 90% opacity, black Screen fill, and the
+            // stronger backdrop sample that corresponds to its radius 60.
+            ZStack {
+                MaximumBackdropBlurMaterial(style: .chrome)
+
+                Color.black
+                    .blendMode(.screen)
+            }
+            .opacity(0.9)
+        }
+        .mask(alphaMask)
+        .frame(width: width, height: height)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var alphaMask: some View {
+        LinearGradient(
+            colors: direction == .bottom
+                ? [.clear, .black]
+                : [.black, .clear],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+}
+
 #if canImport(UIKit)
 private struct MaximumBackdropBlurMaterial: UIViewRepresentable {
+    let style: TransparentGradientBlur.MaterialStyle
+
     func makeUIView(context: Context) -> UIVisualEffectView {
         makeBlurView()
     }
 
     func updateUIView(_ uiView: UIVisualEffectView, context: Context) {
-        uiView.effect = UIBlurEffect(style: .systemChromeMaterial)
+        uiView.effect = UIBlurEffect(style: blurStyle)
         uiView.backgroundColor = .clear
         uiView.contentView.backgroundColor = .clear
     }
 
     private func makeBlurView() -> UIVisualEffectView {
         let view = UIVisualEffectView(
-            effect: UIBlurEffect(style: .systemChromeMaterial)
+            effect: UIBlurEffect(style: blurStyle)
         )
         view.backgroundColor = .clear
         view.contentView.backgroundColor = .clear
         return view
     }
+
+    private var blurStyle: UIBlurEffect.Style {
+        switch style {
+        case .chrome:
+            return .systemChromeMaterial
+        case .ultraThinLight:
+            return .systemUltraThinMaterialLight
+        }
+    }
 }
 #else
 private struct MaximumBackdropBlurMaterial: View {
+    let style: TransparentGradientBlur.MaterialStyle
+
     var body: some View {
         Rectangle()
-            .fill(.thickMaterial)
+            .fill(style == .chrome ? .thickMaterial : .ultraThinMaterial)
     }
 }
 #endif

@@ -1,24 +1,53 @@
 //
 //  AppShellView.swift
-//  Carda
+//  Cardi
 //
 
+import Observation
 import SwiftData
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
 #endif
 
+enum AccountPreferenceKeys {
+    static let avatarImageData = "accountProfile.avatarImageData"
+    static let name = "accountProfile.name"
+    static let phoneNumber = "accountProfile.phoneNumber"
+    static let email = "accountProfile.email"
+    static let hasActivatedLocalAccountStorage = "accountProfile.hasActivatedLocalAccountStorage"
+}
+
 struct AppShellView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     @Query(sort: \BusinessCard.createdAt) private var cards: [BusinessCard]
     @Query(sort: \BusinessCardList.sortOrder) private var cardLists: [BusinessCardList]
+    @AppStorage(LinkedApplicationPreferenceKeys.browser)
+    private var selectedBrowserApplication = LinkedApplicationCategory.browser.defaultApplicationID.rawValue
+    @AppStorage(LinkedApplicationPreferenceKeys.mail)
+    private var selectedMailApplication = LinkedApplicationCategory.mail.defaultApplicationID.rawValue
+    @AppStorage(LinkedApplicationPreferenceKeys.maps)
+    private var selectedMapsApplication = LinkedApplicationCategory.maps.defaultApplicationID.rawValue
+    @AppStorage(AccountPreferenceKeys.avatarImageData)
+    private var storedAccountAvatarImageData = Data()
+    @AppStorage(AccountPreferenceKeys.name)
+    private var storedAccountName = ""
+    @AppStorage(AccountPreferenceKeys.phoneNumber)
+    private var storedAccountPhoneNumber = ""
+    @AppStorage(AccountPreferenceKeys.email)
+    private var storedAccountEmail = ""
+    @AppStorage(AccountPreferenceKeys.hasActivatedLocalAccountStorage)
+    private var hasActivatedLocalAccountStorage = false
+    @AppStorage(CardaSettingsPreferenceKeys.defaultCardSort)
+    private var defaultCardSortRawValue = CardaDefaultCardSort.defaultValue.rawValue
     @State private var selectedSection: AppSection = .myCards
     @State private var isSearchActive = false
     @State private var isSearchEditing = false
     @State private var searchText = ""
     @State private var holderMode: HolderMode = .name
+    @State private var cardHolderHeaderCollapseState = CardHolderHeaderCollapseState()
     @State private var isAddListDialogPresented = false
     @State private var newListName = ""
     @State private var isRenameListDialogPresented = false
@@ -28,26 +57,30 @@ struct AppShellView: View {
     @State private var deleteListTargetID: UUID?
     @State private var selectedContactAction: ShellContactAction?
     @State private var contactActionMessage: String?
+    @State private var hasFinishedInitialDataSetup = false
     @FocusState private var searchFieldFocused: Bool
     @FocusState private var addListNameFocused: Bool
     @FocusState private var renameListNameFocused: Bool
 
     private var accountAvatarImageData: Data? {
-        // Account login/profile storage is not implemented yet, so the shared
-        // account avatar intentionally renders as the blank glass state for now.
-        nil
+        storedAccountAvatarImageData.isEmpty ? nil : storedAccountAvatarImageData
     }
 
     private var accountName: String? {
-        nil
+        normalizedAccountValue(storedAccountName)
     }
 
     private var accountEmail: String? {
-        nil
+        normalizedAccountValue(storedAccountEmail)
+    }
+
+    private var accountPhoneNumber: String? {
+        LocalAccountCardStore.canonicalPhoneNumber(storedAccountPhoneNumber)
     }
 
     private var isAccountLoggedIn: Bool {
         normalizedAccountValue(accountName) != nil
+            && accountPhoneNumber != nil
             && normalizedAccountValue(accountEmail) != nil
     }
 
@@ -58,7 +91,11 @@ struct AppShellView: View {
             ZStack(alignment: .topLeading) {
                 activePageContent
             }
-            .animation(.easeInOut(duration: 0.24), value: activePageKey)
+            .animation(.easeInOut(duration: 0.24), value: selectedSection)
+            .animation(
+                .timingCurve(0.2, 0.72, 0.18, 1, duration: 0.42),
+                value: isSearchActive
+            )
 
             BottomNavigationBar(
                 selectedSection: $selectedSection,
@@ -113,6 +150,7 @@ struct AppShellView: View {
             Text(deleteListConfirmationMessage)
         }
         .onChange(of: selectedSection) { _, _ in
+            resetCardHolderHeaderCollapseOffset()
             dismissAddListDialog()
             dismissRenameListDialog()
             dismissContactAction()
@@ -120,11 +158,39 @@ struct AppShellView: View {
             isDeleteListConfirmationPresented = false
         }
         .onChange(of: isSearchActive) { _, _ in
+            resetCardHolderHeaderCollapseOffset()
             dismissContactAction()
         }
+        .onChange(of: defaultCardSortRawValue) { _, _ in
+            applyDefaultCardSort()
+        }
+        .onChange(of: localAccountDataFingerprint) { _, _ in
+            guard hasFinishedInitialDataSetup else { return }
+            archiveCurrentAccountIfNeeded()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .inactive || newPhase == .background {
+                archiveCurrentAccountIfNeeded()
+            }
+        }
         .task {
-            ReceivedCardSampleSeeder.seedIfNeeded(in: modelContext, existingCards: cards)
-            CardListSeeder.seedIfNeeded(in: modelContext, existingLists: cardLists)
+            #if DEBUG && targetEnvironment(simulator)
+            resetDefaultCardSortForUITestsIfNeeded()
+            #endif
+            applyDefaultCardSort()
+            #if DEBUG && targetEnvironment(simulator)
+            resetAccountProfileForUITestsIfNeeded()
+            seedAccountAvatarForUITestsIfNeeded()
+            let didPrepareLocalAccountUITestData = prepareLocalAccountUITestDataIfNeeded()
+            #else
+            let didPrepareLocalAccountUITestData = false
+            #endif
+            if !didPrepareLocalAccountUITestData && !hasActivatedLocalAccountStorage {
+                CardListSeeder.seedIfNeeded(in: modelContext, existingLists: cardLists)
+            }
+            initializeLocalAccountStorage()
+            removePreviouslyImportedCardsForRelease()
+            hasFinishedInitialDataSetup = true
         }
     }
 
@@ -133,14 +199,19 @@ struct AppShellView: View {
     }
 
     private var searchLiftAnimation: Animation {
-        .timingCurve(0.4, 0, 0.2, 1, duration: 0.32)
+        .timingCurve(0.2, 0.72, 0.18, 1, duration: 0.52)
     }
 
-    private var activePageKey: String {
-        if isSearchActive {
-            return "search"
+    private func applyDefaultCardSort() {
+        let preference = CardaDefaultCardSort(rawValue: defaultCardSortRawValue) ?? .defaultValue
+        switch preference {
+        case .recent:
+            holderMode = .list
+        case .name:
+            holderMode = .name
+        case .organization:
+            holderMode = .organization
         }
-        return selectedSection.rawValue
     }
 
     @ViewBuilder
@@ -159,8 +230,11 @@ struct AppShellView: View {
                 MyCardsView(
                     accountAvatarImageData: accountAvatarImageData,
                     accountName: accountName,
+                    accountPhoneNumber: accountPhoneNumber,
                     accountEmail: accountEmail,
                     isAccountLoggedIn: isAccountLoggedIn,
+                    onUpdateAccount: updateAccountProfile,
+                    onLogout: logoutCurrentAccount,
                     showsPageBackground: false
                 )
                 .transition(.opacity)
@@ -169,13 +243,17 @@ struct AppShellView: View {
                     cards: cardHolderCards,
                     accountAvatarImageData: accountAvatarImageData,
                     accountName: accountName,
+                    accountPhoneNumber: accountPhoneNumber,
                     accountEmail: accountEmail,
                     isAccountLoggedIn: isAccountLoggedIn,
+                    onUpdateAccount: updateAccountProfile,
+                    onLogout: logoutCurrentAccount,
                     onAddList: presentAddListDialog,
                     onRenameList: presentRenameListDialog,
                     onDeleteList: presentDeleteListConfirmation,
                     onInfoAction: presentContactAction,
                     mode: $holderMode,
+                    headerCollapseState: cardHolderHeaderCollapseState,
                     showsPageBackground: false
                 )
                 .transition(.opacity)
@@ -185,29 +263,12 @@ struct AppShellView: View {
 
     @ViewBuilder
     private var activePageBackground: some View {
-        ZStack(alignment: .topLeading) {
-            Color.white
-            Color(red: 48 / 255, green: 49 / 255, blue: 54 / 255)
-                .opacity(0.06)
-
-            HolderModeTabsBackground(mode: holderMode)
-
-            ShellCardHolderBackgroundShape(
-                mode: holderMode,
-                progress: showsCardHolderPanelBackground ? 1 : 0
-            )
-            .fill(holderPanelColor)
-            .animation(
-                .easeInOut(duration: 0.32),
-                value: showsCardHolderPanelBackground
-            )
-
-            AnimatedHolderPanelCapShape(selectionPosition: holderMode.selectionPosition)
-                .fill(holderPanelColor)
-                .frame(width: CardaTheme.canvasWidth, height: 45)
-                .offset(y: 126)
-                .animation(.snappy(duration: 0.28), value: holderMode)
-        }
+        AppShellCardHolderBackground(
+            mode: holderMode,
+            showsPanel: showsCardHolderPanelBackground,
+            collapseState: cardHolderHeaderCollapseState,
+            panelColor: holderPanelColor
+        )
     }
 
     private var showsCardHolderPanelBackground: Bool {
@@ -227,6 +288,282 @@ struct AppShellView: View {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
+
+    private func updateAccountProfile(
+        avatarImageData: Data?,
+        name: String,
+        email: String,
+        phoneNumber: String
+    ) -> Bool {
+        guard
+            let newPhoneNumber = LocalAccountCardStore.canonicalPhoneNumber(phoneNumber)
+        else {
+            return false
+        }
+
+        let store = LocalAccountCardStore()
+        let previousPhoneNumber = accountPhoneNumber
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        do {
+            if previousPhoneNumber != newPhoneNumber {
+                if let previousPhoneNumber {
+                    try store.saveCurrentDatabase(
+                        for: previousPhoneNumber,
+                        in: modelContext
+                    )
+                }
+
+                if try store.archiveExists(for: newPhoneNumber) {
+                    try store.restoreDatabaseIfPresent(
+                        for: newPhoneNumber,
+                        in: modelContext
+                    )
+                } else if previousPhoneNumber != nil {
+                    try store.clearCurrentDatabase(in: modelContext)
+                    try store.saveCurrentDatabase(
+                        for: newPhoneNumber,
+                        in: modelContext
+                    )
+                } else {
+                    try store.saveCurrentDatabase(
+                        for: newPhoneNumber,
+                        in: modelContext
+                    )
+                }
+            } else {
+                try store.saveCurrentDatabase(
+                    for: newPhoneNumber,
+                    in: modelContext
+                )
+            }
+
+            try store.saveProfile(
+                LocalAccountProfile(
+                    avatarImageData: avatarImageData,
+                    name: normalizedName,
+                    phoneNumber: newPhoneNumber,
+                    email: normalizedEmail
+                )
+            )
+
+            storedAccountAvatarImageData = avatarImageData ?? Data()
+            storedAccountName = normalizedName
+            storedAccountPhoneNumber = newPhoneNumber
+            storedAccountEmail = normalizedEmail
+            hasActivatedLocalAccountStorage = true
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func logoutCurrentAccount() -> Bool {
+        guard let accountPhoneNumber else { return false }
+
+        do {
+            let store = LocalAccountCardStore()
+            try store.saveCurrentDatabase(for: accountPhoneNumber, in: modelContext)
+            try store.clearCurrentDatabase(in: modelContext)
+
+            storedAccountAvatarImageData = Data()
+            storedAccountName = ""
+            storedAccountPhoneNumber = ""
+            storedAccountEmail = ""
+            hasActivatedLocalAccountStorage = true
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func initializeLocalAccountStorage() {
+        guard let accountPhoneNumber else { return }
+
+        do {
+            let store = LocalAccountCardStore()
+            if cards.isEmpty,
+               cardLists.isEmpty,
+               try store.archiveExists(for: accountPhoneNumber) {
+                try store.restoreDatabaseIfPresent(
+                    for: accountPhoneNumber,
+                    in: modelContext
+                )
+            } else {
+                try store.saveCurrentDatabase(
+                    for: accountPhoneNumber,
+                    in: modelContext
+                )
+            }
+        } catch {
+            // Keep the live SwiftData database untouched when a backup cannot be read or written.
+        }
+    }
+
+    private func removePreviouslyImportedCardsForRelease() {
+        let store = LocalAccountCardStore()
+        let removedFromCurrentDatabase = (
+            try? PreviouslyImportedCardCleanup.removeFromCurrentDatabase(in: modelContext)
+        ) ?? 0
+
+        if removedFromCurrentDatabase > 0, let accountPhoneNumber {
+            _ = try? store.saveCurrentDatabase(
+                for: accountPhoneNumber,
+                in: modelContext
+            )
+        }
+
+        _ = try? store.removePreviouslyImportedCardsFromAllArchives()
+    }
+
+    private func archiveCurrentAccountIfNeeded() {
+        guard let accountPhoneNumber else { return }
+        _ = try? LocalAccountCardStore().saveCurrentDatabase(
+            for: accountPhoneNumber,
+            in: modelContext
+        )
+    }
+
+    private var localAccountDataFingerprint: Int {
+        var hasher = Hasher()
+        for card in cards.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
+            card.id.hash(into: &hasher)
+            card.ownerKindRaw.hash(into: &hasher)
+            card.name.hash(into: &hasher)
+            card.phoneticName.hash(into: &hasher)
+            card.position.hash(into: &hasher)
+            card.organizationName.hash(into: &hasher)
+            card.avatarImageData?.hash(into: &hasher)
+            card.companyLogoImageData?.hash(into: &hasher)
+            card.cardListID?.hash(into: &hasher)
+            card.createdAt.hash(into: &hasher)
+            card.updatedAt.hash(into: &hasher)
+            card.receivedAt?.hash(into: &hasher)
+            for field in card.sortedFields {
+                field.id.hash(into: &hasher)
+                field.kindRaw.hash(into: &hasher)
+                field.value.hash(into: &hasher)
+                field.sortOrder.hash(into: &hasher)
+                field.createdAt.hash(into: &hasher)
+            }
+        }
+        for list in cardLists.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
+            list.id.hash(into: &hasher)
+            list.name.hash(into: &hasher)
+            list.sortOrder.hash(into: &hasher)
+            list.createdAt.hash(into: &hasher)
+            list.updatedAt.hash(into: &hasher)
+        }
+        return hasher.finalize()
+    }
+
+    #if DEBUG && targetEnvironment(simulator)
+    private func resetDefaultCardSortForUITestsIfNeeded() {
+        guard ProcessInfo.processInfo.environment["CARDA_RESET_DEFAULT_CARD_SORT"] == "1" else {
+            return
+        }
+
+        UserDefaults.standard.removeObject(forKey: CardaSettingsPreferenceKeys.defaultCardSort)
+        defaultCardSortRawValue = CardaDefaultCardSort.defaultValue.rawValue
+    }
+
+    private func resetAccountProfileForUITestsIfNeeded() {
+        guard ProcessInfo.processInfo.environment["CARDA_RESET_ACCOUNT_PROFILE"] == "1" else {
+            return
+        }
+        storedAccountAvatarImageData = Data()
+        storedAccountName = ""
+        storedAccountPhoneNumber = ""
+        storedAccountEmail = ""
+    }
+
+    private func seedAccountAvatarForUITestsIfNeeded() {
+        guard
+            ProcessInfo.processInfo.environment["CARDA_SEED_ACCOUNT_AVATAR"] == "1",
+            let avatarImageData = UIImage(named: "TemporaryHolderAvatar")?.pngData()
+        else {
+            return
+        }
+
+        storedAccountAvatarImageData = avatarImageData
+        storedAccountName = "头像验证"
+        storedAccountPhoneNumber = "13800019999"
+        storedAccountEmail = "avatar@cardi.local"
+    }
+
+    private func prepareLocalAccountUITestDataIfNeeded() -> Bool {
+        guard
+            ProcessInfo.processInfo.environment["CARDA_SEED_LOCAL_ACCOUNT_TEST_DATA"] == "1",
+            let phoneNumber = ProcessInfo.processInfo.environment["CARDA_LOCAL_ACCOUNT_TEST_PHONE"],
+            LocalAccountCardStore.canonicalPhoneNumber(phoneNumber) != nil
+        else {
+            return false
+        }
+
+        let store = LocalAccountCardStore()
+        do {
+            try store.removeAccountDirectory(for: phoneNumber)
+            try LocalAccountCredentialStore().removeCredential(for: phoneNumber)
+            try store.clearCurrentDatabase(in: modelContext)
+
+            let listID = UUID()
+            modelContext.insert(
+                BusinessCardList(
+                    id: listID,
+                    name: "本地归档测试列表",
+                    sortOrder: 0
+                )
+            )
+            modelContext.insert(
+                BusinessCard(
+                    ownerKind: .mine,
+                    name: ProcessInfo.processInfo.environment[
+                        "CARDA_LOCAL_ACCOUNT_TEST_CARD_NAME"
+                    ] ?? "本地归档测试名片",
+                    phoneticName: "Local Archive",
+                    position: "测试",
+                    organizationName: "Cardi",
+                    fields: [
+                        CardInfoField(
+                            kind: .phone,
+                            value: phoneNumber,
+                            sortOrder: 0
+                        )
+                    ]
+                )
+            )
+            modelContext.insert(
+                BusinessCard(
+                    ownerKind: .received,
+                    name: "本地归档测试联系人",
+                    phoneticName: "Local Contact",
+                    position: "测试",
+                    organizationName: "Cardi",
+                    cardListID: listID,
+                    fields: [
+                        CardInfoField(
+                            kind: .email,
+                            value: "archive@carda.local",
+                            sortOrder: 0
+                        )
+                    ],
+                    receivedAt: Date()
+                )
+            )
+            try modelContext.save()
+
+            storedAccountAvatarImageData = Data()
+            storedAccountName = ""
+            storedAccountPhoneNumber = ""
+            storedAccountEmail = ""
+            hasActivatedLocalAccountStorage = false
+            return true
+        } catch {
+            return false
+        }
+    }
+    #endif
 
     private var contactPopupAnimation: Animation {
         .timingCurve(0.37, 0, 0.63, 1, duration: 0.36)
@@ -273,6 +610,14 @@ struct AppShellView: View {
                 .position(x: CardaTheme.canvasWidth / 2, y: 600)
                 .transition(.opacity.combined(with: .scale))
                 .zIndex(23)
+        }
+    }
+
+    private func resetCardHolderHeaderCollapseOffset() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            cardHolderHeaderCollapseState.offset = 0
         }
     }
 
@@ -548,53 +893,51 @@ struct AppShellView: View {
     }
 
     private func openContactAction(_ action: ShellContactAction) {
-        guard let url = actionURL(for: action) else {
+        if action.kind == .phone {
+            guard let url = phoneURL(for: action.value) else {
+                dismissContactAction()
+                showContactActionMessage("内容无效")
+                return
+            }
+
+            dismissContactAction()
+            openURL(url) { accepted in
+                if !accepted {
+                    showContactActionMessage(action.failureMessage)
+                }
+            }
+            return
+        }
+
+        guard action.kind != .companyLogo else {
             dismissContactAction()
             showContactActionMessage("内容无效")
             return
         }
 
         dismissContactAction()
-        openURL(url) { accepted in
-            if !accepted {
-                showContactActionMessage(action.failureMessage)
+        Task { @MainActor in
+            let outcome = await LinkedApplicationRouter.open(
+                kind: action.kind,
+                value: action.value,
+                selectedBrowserRawValue: selectedBrowserApplication,
+                selectedMailRawValue: selectedMailApplication,
+                selectedMapsRawValue: selectedMapsApplication
+            )
+            if let message = outcome.message {
+                showContactActionMessage(message)
             }
         }
     }
 
-    private func actionURL(for action: ShellContactAction) -> URL? {
-        switch action.kind {
-        case .phone:
-            let allowedCharacters = CharacterSet(charactersIn: "+0123456789*#")
-            let sanitized = action.value.unicodeScalars
-                .filter { allowedCharacters.contains($0) }
-                .map(String.init)
-                .joined()
-            guard !sanitized.isEmpty else { return nil }
-            return URL(string: "tel://\(sanitized.replacingOccurrences(of: "#", with: "%23"))")
-
-        case .email:
-            guard let encoded = action.value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
-                return nil
-            }
-            return URL(string: "mailto:\(encoded)")
-
-        case .address:
-            var components = URLComponents(string: "http://maps.apple.com/")
-            components?.queryItems = [URLQueryItem(name: "q", value: action.value)]
-            return components?.url
-
-        case .link:
-            let trimmed = action.value.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return nil }
-            if let url = URL(string: trimmed), url.scheme != nil {
-                return url
-            }
-            return URL(string: "https://\(trimmed)")
-
-        case .companyLogo:
-            return nil
-        }
+    private func phoneURL(for value: String) -> URL? {
+        let allowedCharacters = CharacterSet(charactersIn: "+0123456789*#")
+        let sanitized = value.unicodeScalars
+            .filter { allowedCharacters.contains($0) }
+            .map(String.init)
+            .joined()
+        guard !sanitized.isEmpty else { return nil }
+        return URL(string: "tel://\(sanitized.replacingOccurrences(of: "#", with: "%23"))")
     }
 
     private func showContactActionMessage(_ message: String) {
@@ -757,6 +1100,90 @@ private struct ShellContactActionPopupBackground: View {
             }
             .shadow(color: .black.opacity(0.08), radius: 38, x: 0, y: 18)
             .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 1)
+    }
+}
+
+private struct AppShellCardHolderBackground: View {
+    let mode: HolderMode
+    let showsPanel: Bool
+    let collapseState: CardHolderHeaderCollapseState
+    let panelColor: Color
+
+    private var collapseOffset: CGFloat {
+        min(max(collapseState.offset, 0), 110)
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.white
+            Color(red: 48 / 255, green: 49 / 255, blue: 54 / 255)
+                .opacity(0.06)
+
+            HolderModeTabsBackground(mode: mode)
+                .offset(y: -collapseOffset)
+                .mask(alignment: .topLeading) {
+                    headerVisibilityMask
+                }
+
+            // Moving the 874pt Union upward can expose at most 110pt at the
+            // bottom. Fill that fixed region without enlarging the Shape frame;
+            // enlarging it changes the parent's vertical alignment by 55pt.
+            Rectangle()
+                .fill(panelColor)
+                .frame(width: CardaTheme.canvasWidth, height: 110)
+                .offset(y: CardaTheme.canvasHeight - 110)
+
+            ShellCardHolderBackgroundShape(
+                mode: mode,
+                progress: showsPanel ? 1 : 0
+            )
+            .fill(panelColor)
+            // The Union and the CardHolder sticky module now use the same
+            // external translation primitive. Keeping collapse offset out of
+            // Shape animatableData prevents fast scroll samples from being
+            // interpolated on a second, independent geometry timeline.
+            .frame(
+                width: CardaTheme.canvasWidth,
+                height: CardaTheme.canvasHeight,
+                alignment: .topLeading
+            )
+            .offset(y: showsPanel ? -collapseOffset : 0)
+            .animation(.easeInOut(duration: 0.32), value: showsPanel)
+
+            AnimatedHolderPanelCapShape(selectionPosition: mode.selectionPosition)
+                .fill(panelColor)
+                .frame(width: CardaTheme.canvasWidth, height: 45)
+                .offset(y: 126 - collapseOffset)
+                .mask(alignment: .topLeading) {
+                    headerVisibilityMask
+                }
+                .animation(.snappy(duration: 0.28), value: mode)
+        }
+    }
+
+    private var headerVisibilityMask: some View {
+        VStack(spacing: 0) {
+            LinearGradient(
+                stops: [
+                    Gradient.Stop(color: .clear, location: 0),
+                    Gradient.Stop(color: .black.opacity(0.18), location: 0.35),
+                    Gradient.Stop(color: .black.opacity(0.72), location: 0.75),
+                    Gradient.Stop(color: .black, location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 62)
+
+            Rectangle()
+                .fill(Color.black)
+                .frame(height: CardaTheme.canvasHeight - 62)
+        }
+        .frame(
+            width: CardaTheme.canvasWidth,
+            height: CardaTheme.canvasHeight,
+            alignment: .topLeading
+        )
     }
 }
 

@@ -1,6 +1,6 @@
 //
 //  CardEditorView.swift
-//  Carda
+//  Cardi
 //
 
 import PhotosUI
@@ -8,7 +8,11 @@ import SwiftUI
 import UIKit
 
 struct CardEditorView: View {
+    private static let backgroundPageStride = CardaTheme.canvasWidth
+    fileprivate static let backgroundPageAnimationDuration: TimeInterval = 0.18
+
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var draft: BusinessCardDraft
     @State private var avatarPickerItem: PhotosPickerItem?
     @State private var logoPickerItem: PhotosPickerItem?
@@ -17,11 +21,17 @@ struct CardEditorView: View {
     @State private var focusedDynamicFieldID: UUID?
     @State private var scrollOffsetBeforeDynamicEditing: CGFloat?
     @State private var dynamicFieldScrollRequest = 0
+    @State private var backgroundDragOffset: CGFloat = 0
+    @State private var isSettlingBackgroundPage = false
+    @State private var backgroundIndicatorIndex: Int
 
     let onCommit: (BusinessCardDraft) -> Void
 
     init(initialDraft: BusinessCardDraft, onCommit: @escaping (BusinessCardDraft) -> Void) {
         _draft = State(initialValue: initialDraft)
+        _backgroundIndicatorIndex = State(
+            initialValue: CardBackgroundTemplate.allCases.firstIndex(of: initialDraft.backgroundTemplate) ?? 0
+        )
         self.onCommit = onCommit
     }
 
@@ -46,7 +56,7 @@ struct CardEditorView: View {
             ScrollView {
                 ZStack(alignment: .topLeading) {
                     topCardPreview
-                        .offset(x: 16, y: 63)
+                        .offset(y: 63)
 
                     avatarPicker
                         .offset(x: 43, y: 240)
@@ -121,24 +131,161 @@ struct CardEditorView: View {
     }
 
     private var topCardPreview: some View {
-        BusinessCardView(data: draft.renderData)
-            .onTapGesture {
-                // 底图切换页尚未设计；当前固定使用 Card photo/Group 42.png。
+        let previewHeight = CardLayoutCalculator.height(for: draft.renderData)
+
+        return ZStack(alignment: .top) {
+            ZStack {
+                ForEach(CardBackgroundTemplate.allCases) { template in
+                    BusinessCardView(
+                        data: previewRenderData(for: template),
+                        layerMode: .surface
+                    )
+                    .offset(x: backgroundPageOffset(for: template))
+                    .allowsHitTesting(false)
+                }
+
+                BusinessCardView(
+                    data: draft.renderData,
+                    layerMode: .foreground
+                )
+                .allowsHitTesting(false)
             }
+            .frame(width: CardaTheme.canvasWidth, height: previewHeight)
+            .clipped()
+
+            CardBackgroundPageIndicator(
+                count: CardBackgroundTemplate.allCases.count,
+                selectedIndex: backgroundIndicatorIndex
+            )
+            .offset(y: previewHeight + 12)
+        }
+        .frame(
+            width: CardaTheme.canvasWidth,
+            height: previewHeight + 32,
+            alignment: .top
+        )
+        .contentShape(Rectangle())
+        .simultaneousGesture(backgroundPageSwipeGesture)
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("card-background-picker")
+        .accessibilityLabel("名片底图")
+        .accessibilityValue(draft.backgroundTemplate.accessibilityName)
+        .accessibilityHint("左右轻扫可切换名片底图")
+    }
+
+    private func backgroundPageOffset(for template: CardBackgroundTemplate) -> CGFloat {
+        guard
+            let templateIndex = CardBackgroundTemplate.allCases.firstIndex(of: template),
+            let selectedIndex = CardBackgroundTemplate.allCases.firstIndex(of: draft.backgroundTemplate)
+        else {
+            return backgroundDragOffset
+        }
+
+        return CGFloat(templateIndex - selectedIndex) * Self.backgroundPageStride
+            + backgroundDragOffset
+    }
+
+    private var backgroundPageSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .local)
+            .onChanged { value in
+                guard canHandleBackgroundPageSwipe(value) else { return }
+                backgroundDragOffset = resistedBackgroundDragOffset(value.translation.width)
+            }
+            .onEnded { value in
+                guard canHandleBackgroundPageSwipe(value) else {
+                    resetBackgroundDragOffset()
+                    return
+                }
+
+                let measured = value.translation.width
+                let predicted = value.predictedEndTranslation.width
+                if measured < -35 || predicted < -85 {
+                    settleBackgroundPage(step: 1)
+                } else if measured > 35 || predicted > 85 {
+                    settleBackgroundPage(step: -1)
+                } else {
+                    resetBackgroundDragOffset()
+                }
+            }
+    }
+
+    private func canHandleBackgroundPageSwipe(_ value: DragGesture.Value) -> Bool {
+        guard !isSettlingBackgroundPage else { return false }
+        return abs(value.translation.width) >= abs(value.translation.height)
+    }
+
+    private func resistedBackgroundDragOffset(_ translation: CGFloat) -> CGFloat {
+        let selectedIndex = CardBackgroundTemplate.allCases.firstIndex(of: draft.backgroundTemplate) ?? 0
+        let isDraggingPastFirst = selectedIndex == 0 && translation > 0
+        let isDraggingPastLast = selectedIndex == CardBackgroundTemplate.allCases.count - 1 && translation < 0
+        return (isDraggingPastFirst || isDraggingPastLast) ? translation * 0.18 : translation
+    }
+
+    private func settleBackgroundPage(step: Int) {
+        guard !isSettlingBackgroundPage else { return }
+        let templates = CardBackgroundTemplate.allCases
+        let selectedIndex = templates.firstIndex(of: draft.backgroundTemplate) ?? 0
+        let targetIndex = selectedIndex + step
+        guard templates.indices.contains(targetIndex) else {
+            resetBackgroundDragOffset()
+            return
+        }
+
+        isSettlingBackgroundPage = true
+        let targetOffset = CGFloat(-step) * Self.backgroundPageStride
+        backgroundIndicatorIndex = targetIndex
+
+        if accessibilityReduceMotion {
+            completeBackgroundPageSelection(templates[targetIndex])
+            return
+        }
+
+        withAnimation(.snappy(duration: Self.backgroundPageAnimationDuration)) {
+            backgroundDragOffset = targetOffset
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.backgroundPageAnimationDuration) {
+            completeBackgroundPageSelection(templates[targetIndex])
+        }
+    }
+
+    private func completeBackgroundPageSelection(_ template: CardBackgroundTemplate) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            draft.backgroundTemplate = template
+            backgroundDragOffset = 0
+        }
+        isSettlingBackgroundPage = false
+    }
+
+    private func resetBackgroundDragOffset() {
+        guard backgroundDragOffset != 0 else { return }
+        if accessibilityReduceMotion {
+            backgroundDragOffset = 0
+        } else {
+            withAnimation(.snappy(duration: 0.14)) {
+                backgroundDragOffset = 0
+            }
+        }
+    }
+
+    private func previewRenderData(for template: CardBackgroundTemplate) -> CardRenderData {
+        var data = draft.renderData
+        data.backgroundTemplate = template
+        return data
     }
 
     private var avatarPicker: some View {
         PhotosPicker(selection: $avatarPickerItem, matching: .images) {
-            ZStack {
-                Circle()
-                    .fill(CardaTheme.editorAvatarPlaceholder)
+            Group {
                 if draft.avatarImageData != nil {
                     DataImageView(data: draft.avatarImageData)
                         .clipShape(Circle())
                 } else {
-                    Image(systemName: "person.crop.circle")
-                        .font(.system(size: 34))
-                        .foregroundStyle(Color.white.opacity(0.9))
+                    Image("EditorDefaultAvatar")
+                        .resizable()
+                        .scaledToFit()
                 }
             }
             .frame(width: 88, height: 88)
@@ -359,6 +506,43 @@ struct CardEditorView: View {
 
     private func dynamicFieldScrollAnchorID(for fieldID: UUID) -> String {
         "dynamic-field-input-\(fieldID.uuidString)"
+    }
+}
+
+private struct CardBackgroundPageIndicator: View {
+    let count: Int
+    let selectedIndex: Int
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            HStack(spacing: 12) {
+                ForEach(0..<count, id: \.self) { _ in
+                    Circle()
+                        .fill(CardaTheme.pageIndicatorFill)
+                        .frame(width: 8, height: 8)
+                }
+            }
+
+            Circle()
+                .fill(CardaTheme.pageIndicatorActiveDot)
+                .frame(width: 8, height: 8)
+                .offset(x: CGFloat(activeIndex) * 20)
+                .animation(
+                    .snappy(duration: CardEditorView.backgroundPageAnimationDuration),
+                    value: activeIndex
+                )
+        }
+        .frame(width: indicatorWidth, height: 8, alignment: .leading)
+        .accessibilityHidden(true)
+    }
+
+    private var activeIndex: Int {
+        min(max(selectedIndex, 0), max(count - 1, 0))
+    }
+
+    private var indicatorWidth: CGFloat {
+        guard count > 0 else { return 0 }
+        return CGFloat(count) * 8 + CGFloat(count - 1) * 12
     }
 }
 
