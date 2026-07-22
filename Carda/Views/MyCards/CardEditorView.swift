@@ -305,7 +305,7 @@ struct CardEditorView: View {
                 lineLimit: 1...1,
                 tracking: 4,
                 focusedPlaceholderOpacity: 0.4,
-                secondNameGlyphOffsetX: -36
+                secondNameGlyphOffsetX: -43
             )
             .frame(width: 210, height: 41, alignment: .leading)
 
@@ -317,7 +317,7 @@ struct CardEditorView: View {
                 color: .black,
                 placeholderColor: .black,
                 lineLimit: 1...1,
-                tracking: 16,
+                placeholderTracking: 16,
                 focusedPlaceholderOpacity: 0.4
             )
             .frame(width: 247, height: 22, alignment: .leading)
@@ -799,6 +799,7 @@ private struct FigmaEditorTextField: View {
     let placeholderColor: Color
     let lineLimit: ClosedRange<Int>
     var tracking: CGFloat = 0
+    var placeholderTracking: CGFloat?
     var focusedPlaceholderOpacity = 1.0
     var secondNameGlyphOffsetX: CGFloat?
     var formatsPhoneNumber = false
@@ -837,12 +838,12 @@ private struct FigmaEditorTextField: View {
                 Text("姓        ")
                     .font(placeholderFont)
                     .foregroundStyle(placeholderColor)
-                    .tracking(tracking)
+                    .tracking(resolvedPlaceholderTracking)
 
                 Text("名")
                     .font(placeholderFont)
                     .foregroundStyle(placeholderColor)
-                    .tracking(tracking)
+                    .tracking(resolvedPlaceholderTracking)
                     .offset(x: secondNameGlyphOffsetX)
             }
             .lineLimit(1)
@@ -852,11 +853,15 @@ private struct FigmaEditorTextField: View {
             Text(placeholder)
                 .font(placeholderFont)
                 .foregroundStyle(placeholderColor)
-                .tracking(tracking)
+                .tracking(resolvedPlaceholderTracking)
                 .lineLimit(lineLimit.upperBound)
                 .fixedSize(horizontal: isSingleLine, vertical: false)
                 .allowsHitTesting(false)
         }
+    }
+
+    private var resolvedPlaceholderTracking: CGFloat {
+        placeholderTracking ?? tracking
     }
 
     @ViewBuilder

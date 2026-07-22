@@ -533,6 +533,10 @@ private struct DataStorageSettingsPage: View {
 }
 
 private struct HelpAboutSettingsPage: View {
+    @StateObject private var exchangeDiagnostics = CardExchangeDiagnostics.shared
+    @State private var diagnosticUnlockTapCount = 0
+    @State private var diagnosticsUnlocked = false
+
     private var appVersion: String {
         let version = Bundle.main.object(
             forInfoDictionaryKey: "CFBundleShortVersionString"
@@ -579,7 +583,18 @@ private struct HelpAboutSettingsPage: View {
                 }
 
                 Section("关于") {
-                    settingsValueRow(title: "当前版本", value: appVersion)
+                    Button(action: registerVersionTap) {
+                        settingsValueRow(title: "当前版本", value: appVersion)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    if diagnosticsUnlocked || exchangeDiagnostics.isRecording {
+                        NavigationLink("交换诊断") {
+                            CardExchangeDiagnosticsPage()
+                        }
+                        .accessibilityIdentifier("settings.exchangeDiagnostics")
+                    }
                     NavigationLink("隐私政策") {
                         SettingsTextPage(
                             title: "隐私政策",
@@ -603,6 +618,15 @@ private struct HelpAboutSettingsPage: View {
             .cardaSettingsFormStyle()
         }
         .cardaSettingsPageStyle()
+    }
+
+    private func registerVersionTap() {
+        guard !diagnosticsUnlocked else { return }
+        diagnosticUnlockTapCount += 1
+        if diagnosticUnlockTapCount >= 7 {
+            diagnosticsUnlocked = true
+            diagnosticUnlockTapCount = 0
+        }
     }
 }
 
@@ -633,7 +657,7 @@ private struct SettingsTextPage: View {
     }
 }
 
-private struct CardaSettingsToolbar: View {
+struct CardaSettingsToolbar: View {
     @Environment(\.dismiss) private var dismiss
 
     let title: String
@@ -693,9 +717,9 @@ private enum CardaSettingsCopy {
     ]
 
     static let exchangeHelp = [
-        "在“我的名片”页面向上滑动当前名片，Cardi 会寻找约 1.5 米内方向明确且最近的 Cardi 用户。",
+        "在“我的名片”页面向上滑动当前名片，Cardi 会寻找约 1.5 米内最近且目标明确的 Cardi 用户。",
         "双方在短时间内同时上滑时会互换名片；单向收到名片后，也可以在接收界面选择回递自己的名片。",
-        "附近交换依赖蓝牙、本地网络与设备支持的精准方向识别能力。关闭“允许附近的 Cardi 用户发现我”后不会进行附近交换。"
+        "附近交换依赖蓝牙、本地网络和精准距离测量；设备支持时会同时校验方向，不支持方向时只会选择唯一且距离明确最近的设备。关闭“允许附近的 Cardi 用户发现我”后不会进行附近交换。"
     ]
 
     static let privacy = [
@@ -729,7 +753,7 @@ private func settingsValueRow(title: String, value: String) -> some View {
     }
 }
 
-private extension View {
+extension View {
     func cardaSettingsFormStyle() -> some View {
         formStyle(.grouped)
             .scrollContentBackground(.hidden)

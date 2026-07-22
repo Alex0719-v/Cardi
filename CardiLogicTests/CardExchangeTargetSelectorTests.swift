@@ -16,6 +16,9 @@ private enum CardExchangeTargetSelectorTests {
         rejectsCandidatesOutsideEveryBoundary()
         treatsOnlySubThresholdDistanceGapsAsAmbiguous()
         locksTheNearestEligiblePeer()
+        directionModeRejectsMissingDirection()
+        distanceOnlyModeLocksAUniqueNearestPeer()
+        distanceOnlyModeStillRejectsAmbiguousPeers()
         print("CardExchangeTargetSelectorTests: PASS")
     }
 
@@ -109,10 +112,49 @@ private enum CardExchangeTargetSelectorTests {
         precondition(target.displayName == "nearest")
     }
 
+    private static func directionModeRejectsMissingDirection() {
+        let selector = CardExchangeTargetSelector()
+        let candidate = makeCandidate(name: "distance-only", distance: 0.6, direction: nil)
+
+        assertNone(
+            selector.select(from: [candidate], now: now, mode: .directionAndDistance),
+            "direction-capable mode requires a forward direction vector"
+        )
+    }
+
+    private static func distanceOnlyModeLocksAUniqueNearestPeer() {
+        let selector = CardExchangeTargetSelector()
+        let nearest = makeCandidate(name: "nearest", distance: 0.6, direction: nil)
+        let farther = makeCandidate(name: "farther", distance: 1.1, direction: nil)
+
+        guard case .locked(let target) = selector.select(
+            from: [farther, nearest],
+            now: now,
+            mode: .distanceOnly
+        ) else {
+            preconditionFailure("Distance-only mode should lock one clearly nearest peer")
+        }
+        precondition(target.displayName == "nearest")
+    }
+
+    private static func distanceOnlyModeStillRejectsAmbiguousPeers() {
+        let selector = CardExchangeTargetSelector()
+        let nearest = makeCandidate(name: "nearest", distance: 0.6, direction: nil)
+        let nearbySecond = makeCandidate(name: "second", distance: 0.85, direction: nil)
+
+        guard case .ambiguous = selector.select(
+            from: [nearbySecond, nearest],
+            now: now,
+            mode: .distanceOnly
+        ) else {
+            preconditionFailure("Distance-only mode must not guess between similarly close peers")
+        }
+    }
+
     private static func makeCandidate(
         name: String,
         distance: Float,
-        direction: SIMD3<Float> = SIMD3<Float>(0, 0, -1),
+        direction: SIMD3<Float>? = SIMD3<Float>(0, 0, -1),
         qualifiedSince: Date = now.addingTimeInterval(-1),
         updatedAt: Date = now
     ) -> CardExchangeTargetCandidate {

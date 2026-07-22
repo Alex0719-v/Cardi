@@ -54,6 +54,7 @@ struct AccountProfilePage: View {
     var body: some View {
         VStack(spacing: 0) {
             accountToolbar
+                .zIndex(1)
 
             Form {
                 Section {
@@ -275,7 +276,9 @@ struct AccountProfilePage: View {
             Text(title)
                 .font(CardaTheme.pingFang(size: 17))
                 .foregroundStyle(Color.black)
-                .frame(width: 52, alignment: .leading)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(width: 60, alignment: .leading)
 
             Spacer(minLength: 0)
 

@@ -21,6 +21,7 @@ final class MultipeerExchangeTransport: NSObject {
     private var browser: MCNearbyServiceBrowser?
     private var invitedPeers: Set<MCPeerID> = []
     private var isRunning = false
+    private let diagnostics = CardExchangeDiagnostics.shared
 
     override init() {
         let peerUUID = Self.localPeerUUID()
@@ -36,6 +37,10 @@ final class MultipeerExchangeTransport: NSObject {
 
     var connectedPeers: [MCPeerID] {
         session.connectedPeers
+    }
+
+    var localPeerIdentifier: String {
+        localPeerID.displayName
     }
 
     func startReceiving() {
@@ -55,6 +60,16 @@ final class MultipeerExchangeTransport: NSObject {
         advertiser.delegate = self
         advertiser.startAdvertisingPeer()
         self.advertiser = advertiser
+        diagnostics.record(
+            stage: .discovery,
+            name: "advertising_started",
+            details: [
+                "service": Self.serviceType,
+                "localPeerHash": CardExchangeDiagnostics.anonymousIdentifier(
+                    localPeerID.displayName
+                )
+            ]
+        )
     }
 
     func startActiveDiscovery() {
@@ -70,17 +85,32 @@ final class MultipeerExchangeTransport: NSObject {
         browser.delegate = self
         browser.startBrowsingForPeers()
         self.browser = browser
+        diagnostics.record(
+            stage: .discovery,
+            name: "browsing_started",
+            details: ["service": Self.serviceType]
+        )
     }
 
     func stopActiveDiscovery() {
+        let wasBrowsing = browser != nil
         browser?.stopBrowsingForPeers()
         browser?.delegate = nil
         browser = nil
+        if wasBrowsing {
+            diagnostics.record(stage: .discovery, name: "browsing_stopped")
+        }
     }
 
     func disconnectAllPeers() {
+        let peerCount = session.connectedPeers.count
         invitedPeers.removeAll()
         session.disconnect()
+        diagnostics.record(
+            stage: .connection,
+            name: "disconnect_all_requested",
+            details: ["connectedPeerCount": String(peerCount)]
+        )
     }
 
     func stop() {
@@ -93,15 +123,47 @@ final class MultipeerExchangeTransport: NSObject {
         stopActiveDiscovery()
 
         disconnectAllPeers()
+        diagnostics.record(stage: .lifecycle, name: "transport_stopped")
     }
 
-    func send(_ data: Data, to peer: MCPeerID) {
-        guard session.connectedPeers.contains(peer) else { return }
+    @discardableResult
+    func send(_ data: Data, to peer: MCPeerID) -> Bool {
+        guard session.connectedPeers.contains(peer) else {
+            diagnostics.record(
+                stage: .transfer,
+                name: "transport_send_rejected_not_connected",
+                level: .error,
+                peerIdentifier: peer.displayName,
+                details: ["bytes": String(data.count)]
+            )
+            onFailure?("名片交换连接已断开")
+            return false
+        }
 
         do {
             try session.send(data, toPeers: [peer], with: .reliable)
+            diagnostics.record(
+                stage: .transfer,
+                name: "transport_send_succeeded",
+                peerIdentifier: peer.displayName,
+                details: ["bytes": String(data.count)]
+            )
+            return true
         } catch {
+            let nsError = error as NSError
+            diagnostics.record(
+                stage: .transfer,
+                name: "transport_send_failed",
+                level: .error,
+                peerIdentifier: peer.displayName,
+                details: [
+                    "bytes": String(data.count),
+                    "errorDomain": nsError.domain,
+                    "errorCode": String(nsError.code)
+                ]
+            )
             onFailure?("名片交换发送失败")
+            return false
         }
     }
 
@@ -129,10 +191,21 @@ extension MultipeerExchangeTransport: MCNearbyServiceAdvertiserDelegate {
     ) {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isRunning else {
+                self?.diagnostics.record(
+                    stage: .connection,
+                    name: "incoming_invitation_rejected_not_running",
+                    level: .warning,
+                    peerIdentifier: peerID.displayName
+                )
                 invitationHandler(false, nil)
                 return
             }
 
+            self.diagnostics.record(
+                stage: .connection,
+                name: "incoming_invitation_accepted",
+                peerIdentifier: peerID.displayName
+            )
             invitationHandler(true, self.session)
         }
     }
@@ -142,6 +215,16 @@ extension MultipeerExchangeTransport: MCNearbyServiceAdvertiserDelegate {
         didNotStartAdvertisingPeer error: Error
     ) {
         DispatchQueue.main.async { [weak self] in
+            let nsError = error as NSError
+            self?.diagnostics.record(
+                stage: .discovery,
+                name: "advertising_failed",
+                level: .error,
+                details: [
+                    "errorDomain": nsError.domain,
+                    "errorCode": String(nsError.code)
+                ]
+            )
             self?.onFailure?("附近发现广播启动失败")
         }
     }
@@ -164,6 +247,12 @@ extension MultipeerExchangeTransport: MCNearbyServiceBrowserDelegate {
             }
 
             self.invitedPeers.insert(peerID)
+            self.diagnostics.record(
+                stage: .discovery,
+                name: "peer_found_invitation_sent",
+                peerIdentifier: peerID.displayName,
+                details: ["timeoutSeconds": "8"]
+            )
             browser.invitePeer(peerID, to: self.session, withContext: nil, timeout: 8)
         }
     }
@@ -171,6 +260,11 @@ extension MultipeerExchangeTransport: MCNearbyServiceBrowserDelegate {
     func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
         DispatchQueue.main.async { [weak self] in
             self?.invitedPeers.remove(peerID)
+            self?.diagnostics.record(
+                stage: .discovery,
+                name: "peer_lost",
+                peerIdentifier: peerID.displayName
+            )
         }
     }
 
@@ -179,6 +273,16 @@ extension MultipeerExchangeTransport: MCNearbyServiceBrowserDelegate {
         didNotStartBrowsingForPeers error: Error
     ) {
         DispatchQueue.main.async { [weak self] in
+            let nsError = error as NSError
+            self?.diagnostics.record(
+                stage: .discovery,
+                name: "browsing_failed",
+                level: .error,
+                details: [
+                    "errorDomain": nsError.domain,
+                    "errorCode": String(nsError.code)
+                ]
+            )
             self?.onFailure?("附近设备浏览启动失败")
         }
     }
@@ -191,6 +295,23 @@ extension MultipeerExchangeTransport: MCSessionDelegate {
         didChange state: MCSessionState
     ) {
         DispatchQueue.main.async { [weak self] in
+            let stateName: String
+            switch state {
+            case .connected:
+                stateName = "connected"
+            case .notConnected:
+                stateName = "not_connected"
+            case .connecting:
+                stateName = "connecting"
+            @unknown default:
+                stateName = "unknown"
+            }
+            self?.diagnostics.record(
+                stage: .connection,
+                name: "peer_state_changed",
+                peerIdentifier: peerID.displayName,
+                details: ["state": stateName]
+            )
             switch state {
             case .connected:
                 self?.onPeerConnected?(peerID)
@@ -211,6 +332,12 @@ extension MultipeerExchangeTransport: MCSessionDelegate {
         fromPeer peerID: MCPeerID
     ) {
         DispatchQueue.main.async { [weak self] in
+            self?.diagnostics.record(
+                stage: .transfer,
+                name: "transport_data_received",
+                peerIdentifier: peerID.displayName,
+                details: ["bytes": String(data.count)]
+            )
             self?.onDataReceived?(data, peerID)
         }
     }

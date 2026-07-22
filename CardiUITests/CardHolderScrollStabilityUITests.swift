@@ -3,10 +3,18 @@ import XCTest
 
 final class CardHolderScrollStabilityUITests: XCTestCase {
     private var app: XCUIApplication!
+    private let seededReceivedCardName = "本地归档测试联系人"
+    private let seededNameGroup = "B"
+    private let seededOrganizationGroup = "C"
+    private let cardHolderTestPhoneNumber = "13900019991"
 
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
+        app.launchEnvironment["CARDA_RESET_ACCOUNT_PROFILE"] = "1"
+        app.launchEnvironment["CARDA_SEED_LOCAL_ACCOUNT_TEST_DATA"] = "1"
+        app.launchEnvironment["CARDA_LOCAL_ACCOUNT_TEST_PHONE"] = cardHolderTestPhoneNumber
+        app.launchEnvironment["CARDA_SEED_CARD_HOLDER_BATCH_TEST_DATA"] = "1"
         app.launch()
     }
 
@@ -201,14 +209,14 @@ final class CardHolderScrollStabilityUITests: XCTestCase {
         assertModeChromeIsVisibleAndInsideCanvas()
 
         app.buttons["姓名"].tap()
-        app.buttons["跳转到 A"].tap()
-        XCTAssertTrue(waitForVisibleText("A"), "姓名模式 A 分组标题应保持可见")
-        XCTAssertTrue(waitForVisibleText("安晨"), "姓名模式名片文字应保持可见")
+        app.buttons["跳转到 \(seededNameGroup)"].tap()
+        XCTAssertTrue(waitForVisibleText(seededNameGroup), "姓名模式分组标题应保持可见")
+        XCTAssertTrue(waitForVisibleText(seededReceivedCardName), "姓名模式名片文字应保持可见")
 
         app.buttons["公司"].tap()
-        app.buttons["跳转到 B"].tap()
-        XCTAssertTrue(waitForVisibleText("B"), "公司模式 B 分组标题应保持可见")
-        XCTAssertTrue(waitForVisibleText("唐一鸣"), "公司模式名片文字应保持可见")
+        app.buttons["跳转到 \(seededOrganizationGroup)"].tap()
+        XCTAssertTrue(waitForVisibleText(seededOrganizationGroup), "公司模式分组标题应保持可见")
+        XCTAssertTrue(waitForVisibleText(seededReceivedCardName), "公司模式名片文字应保持可见")
 
         attachScreenshot(named: "05-after-rapid-mode-scroll-stress")
     }
@@ -217,10 +225,10 @@ final class CardHolderScrollStabilityUITests: XCTestCase {
         enterCardHolder()
 
         tapCanvasPoint(x: 285, y: 145)
-        XCTAssertTrue(app.buttons["跳转到 B"].waitForExistence(timeout: 2))
-        app.buttons["跳转到 B"].tap()
+        XCTAssertTrue(app.buttons["跳转到 \(seededOrganizationGroup)"].waitForExistence(timeout: 2))
+        app.buttons["跳转到 \(seededOrganizationGroup)"].tap()
         XCTAssertTrue(
-            waitForVisibleText("唐一鸣"),
+            waitForVisibleText(seededReceivedCardName),
             "点击公司标签的非文字区域后应切换到公司模式"
         )
 
@@ -231,10 +239,10 @@ final class CardHolderScrollStabilityUITests: XCTestCase {
         )
 
         tapCanvasPoint(x: 150, y: 145)
-        XCTAssertTrue(app.buttons["跳转到 A"].waitForExistence(timeout: 2))
-        app.buttons["跳转到 A"].tap()
+        XCTAssertTrue(app.buttons["跳转到 \(seededNameGroup)"].waitForExistence(timeout: 2))
+        app.buttons["跳转到 \(seededNameGroup)"].tap()
         XCTAssertTrue(
-            waitForVisibleText("安晨"),
+            waitForVisibleText(seededReceivedCardName),
             "点击姓名标签的非文字区域后应切换到姓名模式"
         )
 
@@ -249,10 +257,15 @@ final class CardHolderScrollStabilityUITests: XCTestCase {
         listRow.tap()
         RunLoop.current.run(until: Date().addingTimeInterval(0.4))
 
+        XCTAssertTrue(waitForVisibleText("名片夹"))
         app.buttons["多选"].tap()
         XCTAssertTrue(app.buttons["退出"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["取消选择"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.buttons["添加列表"].exists)
+        XCTAssertTrue(
+            waitForVisibleText("已选择 (0)"),
+            "进入多选后标题应显示当前选择数量 0"
+        )
 
         var card = firstMultiSelectCard()
         XCTAssertTrue(card.waitForExistence(timeout: 3))
@@ -261,6 +274,10 @@ final class CardHolderScrollStabilityUITests: XCTestCase {
         card.tap()
 
         XCTAssertTrue(waitForCardValue(identifier: cardIdentifier, expected: "已选择"))
+        XCTAssertTrue(
+            waitForVisibleText("已选择 (1)"),
+            "选择一张名片后标题数量应更新为 1"
+        )
         card = app.buttons[cardIdentifier]
         XCTAssertEqual(
             uncategorizedListRow().value as? String,
@@ -271,6 +288,10 @@ final class CardHolderScrollStabilityUITests: XCTestCase {
 
         app.buttons["取消选择"].tap()
         XCTAssertTrue(app.buttons["退出"].exists, "取消选择后应保留多选模式")
+        XCTAssertTrue(
+            waitForVisibleText("已选择 (0)"),
+            "清空选择后标题数量应恢复为 0"
+        )
         XCTAssertEqual(firstMultiSelectCard().value as? String, "未选择")
         XCTAssertEqual(uncategorizedListRow().value as? String, "未包含已选名片")
 
@@ -279,9 +300,11 @@ final class CardHolderScrollStabilityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["多选"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["添加列表"].waitForExistence(timeout: 2))
         XCTAssertFalse(app.buttons["取消选择"].exists)
+        XCTAssertTrue(waitForVisibleText("名片夹"), "退出多选后应恢复名片夹标题")
 
         app.buttons["多选"].tap()
         XCTAssertEqual(firstMultiSelectCard().value as? String, "未选择")
+        XCTAssertTrue(waitForVisibleText("已选择 (0)"))
         attachScreenshot(named: "07-list-multi-selection-cleared")
     }
 
@@ -304,8 +327,11 @@ final class CardHolderScrollStabilityUITests: XCTestCase {
         XCTAssertEqual(firstCard.value as? String, "已选择")
         XCTAssertEqual(secondCard.value as? String, "已选择")
 
-        let targetRow = listRow(named: "见面会")
-        XCTAssertTrue(targetRow.waitForExistence(timeout: 2))
+        guard let targetRow = visibleTargetListRow(excluding: sourceRow.identifier) else {
+            XCTFail("缺少可见的目标列表，无法验证批量拖放")
+            return
+        }
+        let targetIdentifier = targetRow.identifier
         let initialTargetCount = listCount(from: targetRow.label)
 
         firstCard.press(
@@ -317,14 +343,14 @@ final class CardHolderScrollStabilityUITests: XCTestCase {
 
         XCTAssertTrue(
             waitForListCount(
-                named: "见面会",
+                identifier: targetIdentifier,
                 expected: initialTargetCount + 2
             ),
             "两张已选名片应在一次拖放中移入目标列表"
         )
         XCTAssertTrue(app.buttons["退出"].exists, "移动成功后应继续停留在多选模式")
         XCTAssertEqual(
-            listRow(named: "见面会").value as? String,
+            app.buttons[targetIdentifier].value as? String,
             "未包含已选名片",
             "实际移入目标列表的名片应自动取消选择"
         )
@@ -370,6 +396,19 @@ final class CardHolderScrollStabilityUITests: XCTestCase {
             .firstMatch
     }
 
+    private func visibleTargetListRow(excluding sourceIdentifier: String) -> XCUIElement? {
+        let canvas = app.windows.firstMatch.frame
+        return app.buttons
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "card-holder-list-"))
+            .allElementsBoundByIndex
+            .first { row in
+                row.exists
+                    && row.isHittable
+                    && row.identifier != sourceIdentifier
+                    && row.frame.intersects(canvas)
+            }
+    }
+
     private func listCount(from label: String) -> Int {
         guard
             let open = label.lastIndex(of: "（"),
@@ -389,6 +428,23 @@ final class CardHolderScrollStabilityUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             let row = listRow(named: name)
+            if row.exists, listCount(from: row.label) == expected {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while Date() < deadline
+
+        return false
+    }
+
+    private func waitForListCount(
+        identifier: String,
+        expected: Int,
+        timeout: TimeInterval = 4
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let row = app.buttons[identifier]
             if row.exists, listCount(from: row.label) == expected {
                 return true
             }
@@ -482,7 +538,7 @@ final class CardHolderScrollStabilityUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             let canvas = app.windows.firstMatch.frame
-            let hasVisibleMatch = app.staticTexts
+            let hasVisibleMatch = app.descendants(matching: .any)
                 .matching(NSPredicate(format: "label == %@", label))
                 .allElementsBoundByIndex
                 .contains { element in

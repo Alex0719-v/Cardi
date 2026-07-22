@@ -11,9 +11,14 @@ struct CardExchangeTargetCandidate {
     let peerID: MCPeerID
     let displayName: String
     let distance: Float
-    let direction: SIMD3<Float>
+    let direction: SIMD3<Float>?
     let qualifiedSince: Date
     let updatedAt: Date
+}
+
+enum CardExchangeTargetSelectionMode {
+    case directionAndDistance
+    case distanceOnly
 }
 
 enum CardExchangeTargetSelection {
@@ -55,14 +60,15 @@ struct CardExchangeTargetSelector {
 
     func select(
         from candidates: [CardExchangeTargetCandidate],
-        now: Date
+        now: Date,
+        mode: CardExchangeTargetSelectionMode = .directionAndDistance
     ) -> CardExchangeTargetSelection {
         let eligible = candidates
             .filter { candidate in
                 now.timeIntervalSince(candidate.updatedAt) <= readingTTL
                     && now.timeIntervalSince(candidate.qualifiedSince) >= stableDuration
                     && candidate.distance <= maximumDistance
-                    && isDirectionForward(candidate.direction)
+                    && isDirectionEligible(candidate.direction, mode: mode)
             }
             .sorted { lhs, rhs in
                 if lhs.distance == rhs.distance {
@@ -89,5 +95,18 @@ struct CardExchangeTargetSelector {
                 distance: nearest.distance
             )
         )
+    }
+
+    private func isDirectionEligible(
+        _ direction: SIMD3<Float>?,
+        mode: CardExchangeTargetSelectionMode
+    ) -> Bool {
+        switch mode {
+        case .directionAndDistance:
+            guard let direction else { return false }
+            return isDirectionForward(direction)
+        case .distanceOnly:
+            return true
+        }
     }
 }

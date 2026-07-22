@@ -415,7 +415,7 @@ struct CardHolderView: View {
         let groupedScale: CGFloat = 1
         let listScale: CGFloat = 22 / 34
 
-        return Text("名片夹")
+        return Text(holderTitle)
             .font(CardaTheme.pingFang(size: 34, weight: .semibold))
             .tracking(0.4 * Double(1 - progress))
             .foregroundStyle(Color.black)
@@ -429,6 +429,11 @@ struct CardHolderView: View {
                 y: 82.5 + (88 - 82.5) * progress
             )
             .modifier(headerTextOpacityModifier)
+            .accessibilityIdentifier("card-holder-title")
+    }
+
+    private var holderTitle: String {
+        isMultiSelecting ? "已选择 (\(selectedCardIDs.count))" : "名片夹"
     }
 
     private var morphingHeaderActionControls: some View {
@@ -658,6 +663,7 @@ struct CardHolderView: View {
                                     }
                                 }
                                 .padding(.top, -12)
+                                .id(group.contentID)
                             } header: {
                                 trackedGroupTitle(group.title, mode: groupedMode)
                             }
@@ -1261,7 +1267,10 @@ struct CardHolderView: View {
                     }
                 }
         )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(row.title)
         .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("card-holder-list-\(row.id)")
         .accessibilityValue(
             isMultiSelecting
                 ? hasSelectedCard ? "包含已选名片" : "未包含已选名片"
@@ -1354,9 +1363,9 @@ struct CardHolderView: View {
         case .list:
             return nil
         case .name:
-            return groupedCards.first { $0.title == letter }?.id
+            return groupedCards.first { $0.title == letter }?.contentID
         case .organization:
-            return groupedCards.first { $0.title == letter }?.id
+            return groupedCards.first { $0.title == letter }?.contentID
         }
     }
 
@@ -3682,6 +3691,7 @@ private final class HolderDerivedDataCache {
         }
         .map { key, records in
             GroupedCardSection(
+                mode: .name,
                 title: key.isEmpty ? "#" : key,
                 cards: records.map(\.card)
             )
@@ -3699,6 +3709,7 @@ private final class HolderDerivedDataCache {
         }
         .map { initial, records in
             GroupedCardSection(
+                mode: .organization,
                 title: initial,
                 cards: records.map(\.card)
             )
@@ -3708,10 +3719,12 @@ private final class HolderDerivedDataCache {
 }
 
 private struct GroupedCardSection: Identifiable {
+    let mode: HolderMode
     let title: String
     let cards: [BusinessCard]
 
-    var id: String { title }
+    var id: String { "\(mode.rawValue):\(title)" }
+    var contentID: String { "\(id):content" }
 }
 
 private struct GroupedCardSortRecord {

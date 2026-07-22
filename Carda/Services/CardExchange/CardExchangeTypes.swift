@@ -53,6 +53,22 @@ enum CardExchangePhase: Equatable {
     case ambiguous
     case noTarget
     case failed(String)
+
+    var diagnosticCode: String {
+        switch self {
+        case .unavailable: "unavailable"
+        case .listening: "listening"
+        case .discovering: "discovering"
+        case .confirmingDirection: "confirming_direction"
+        case .targetLocked: "target_locked"
+        case .resolvingIntent: "resolving_intent"
+        case .sending(_, let mode): "sending_\(mode.rawValue)"
+        case .waitingForPersistence(_, let mode): "waiting_persistence_\(mode.rawValue)"
+        case .ambiguous: "ambiguous"
+        case .noTarget: "no_target"
+        case .failed: "failed"
+        }
+    }
 }
 
 struct CardaExchangeTargetSummary: Equatable {

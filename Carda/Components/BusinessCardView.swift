@@ -104,11 +104,17 @@ struct BusinessCardView: View {
         case foreground
     }
 
+    enum RenderingMode: Equatable {
+        case standard
+        case exportedImage
+    }
+
     let data: CardRenderData
     var width: CGFloat = CardaTheme.cardWidth
     var onInfoAction: ((CardFieldDraft) -> Void)?
     var isExpanded = true
     var layerMode: LayerMode = .complete
+    var renderingMode: RenderingMode = .standard
 
     private var scale: CGFloat {
         width / CardaTheme.cardWidth
@@ -126,12 +132,14 @@ struct BusinessCardView: View {
         ZStack(alignment: .topLeading) {
             if layerMode != .foreground {
                 cardBackground
-                actionButtonBackgroundColumn
-                    .opacity(isExpanded ? 1 : 0)
-                    .animation(
-                        CardExpansionMotion.detailsAnimation(isExpanded: isExpanded),
-                        value: isExpanded
-                    )
+                if renderingMode == .standard {
+                    actionButtonBackgroundColumn
+                        .opacity(isExpanded ? 1 : 0)
+                        .animation(
+                            CardExpansionMotion.detailsAnimation(isExpanded: isExpanded),
+                            value: isExpanded
+                        )
+                }
             }
 
             if layerMode != .surface {
@@ -184,11 +192,12 @@ struct BusinessCardView: View {
     }
 
     private var cardBodyShape: BusinessCardBodyShape {
-        BusinessCardBodyShape(
-            cutoutTop: cardBodyCutoutTop * scale,
-            cutoutWidth: cardBodyCutoutWidth * scale,
-            collapsedCornerRadius: 30 * scale,
-            expandedCornerRadius: cardBodyCornerRadius * scale,
+        let isExportedImage = renderingMode == .exportedImage
+        return BusinessCardBodyShape(
+            cutoutTop: (isExportedImage ? unscaledHeight : cardBodyCutoutTop) * scale,
+            cutoutWidth: (isExportedImage ? 0 : cardBodyCutoutWidth) * scale,
+            collapsedCornerRadius: (isExportedImage ? 0 : 30) * scale,
+            expandedCornerRadius: (isExportedImage ? 0 : cardBodyCornerRadius) * scale,
             expansionProgress: isExpanded ? 1 : 0,
             usesCompactSingleButtonCutout: actionButtonFields.count == 1
         )
@@ -199,7 +208,7 @@ struct BusinessCardView: View {
             cardBodyShape
                 .fill(Color.white, style: FillStyle(eoFill: true))
 
-            if isExpanded {
+            if isExpanded, renderingMode == .standard {
                 VStack(spacing: 5 * scale) {
                     ForEach(actionButtonFields, id: \.id) { _ in
                         Circle()
@@ -535,9 +544,11 @@ struct BusinessCardView: View {
             VStack(alignment: .trailing, spacing: 6 * scale) {
                 ForEach(Array(fields.enumerated()), id: \.element.id) { index, field in
                     let isLastField = index == fields.count - 1
-                    let lineCount = isLastField
-                        ? 1
-                        : CardLayoutCalculator.infoLineCount(for: field)
+                    let lineCount = infoLineCount(
+                        for: field,
+                        at: index,
+                        fieldCount: fields.count
+                    )
                     Text(field.displayValue)
                         .font(infoFont(for: field.kind, size: 14 * scale))
                         .foregroundStyle(CardaTheme.secondaryText)
@@ -552,7 +563,10 @@ struct BusinessCardView: View {
                 }
             }
             .frame(width: 185 * scale, alignment: .trailing)
-            .offset(x: 122 * scale, y: infoGroupTop * scale)
+            .offset(
+                x: (renderingMode == .exportedImage ? 137 : 122) * scale,
+                y: infoGroupTop * scale
+            )
         }
     }
 
@@ -565,24 +579,84 @@ struct BusinessCardView: View {
         guard !fields.isEmpty else { return 0 }
 
         let textHeight = fields.enumerated().reduce(CGFloat.zero) { partial, entry in
-            let isLastField = entry.offset == fields.count - 1
-            let lineCount = isLastField
-                ? 1
-                : CardLayoutCalculator.infoLineCount(for: entry.element)
+            let lineCount = infoLineCount(
+                for: entry.element,
+                at: entry.offset,
+                fieldCount: fields.count
+            )
             return partial + CGFloat(lineCount) * 20
         }
         let spacing = CGFloat(max(0, fields.count - 1)) * 6
         return textHeight + spacing
     }
 
+    @ViewBuilder
     private var actionButtonColumn: some View {
+        if renderingMode == .exportedImage {
+            exportedInfoIconColumn
+        } else {
+            standardActionButtonColumn
+        }
+    }
+
+    private var standardActionButtonColumn: some View {
         VStack(spacing: 5 * scale) {
             ForEach(actionButtonFields, id: \.id) { field in
-                CardActionButton(field: field, scale: scale, action: onInfoAction)
+                CardActionButton(
+                    field: field,
+                    scale: scale,
+                    action: onInfoAction
+                )
             }
         }
         .frame(width: 34 * scale, height: actionButtonColumnHeight * scale, alignment: .top)
         .offset(x: 336 * scale, y: actionButtonColumnTop * scale)
+    }
+
+    private var exportedInfoIconColumn: some View {
+        let fields = actionButtonFields
+
+        return ZStack(alignment: .topLeading) {
+            ForEach(Array(fields.enumerated()), id: \.element.id) { index, field in
+                CardFieldIconView(kind: field.kind, scale: scale * 0.75)
+                    .frame(width: 15 * scale, height: 15 * scale)
+                    .frame(width: 34 * scale, height: 20 * scale)
+                    .offset(
+                        x: -10 * scale,
+                        y: infoRowTop(for: index, in: fields) * scale
+                    )
+            }
+        }
+        .frame(
+            width: 34 * scale,
+            height: infoGroupDepth * scale,
+            alignment: .topLeading
+        )
+        .offset(x: 336 * scale, y: infoGroupTop * scale)
+    }
+
+    private func infoLineCount(
+        for field: CardFieldDraft,
+        at index: Int,
+        fieldCount: Int
+    ) -> Int {
+        index == fieldCount - 1
+            ? 1
+            : CardLayoutCalculator.infoLineCount(for: field)
+    }
+
+    private func infoRowTop(for index: Int, in fields: [CardFieldDraft]) -> CGFloat {
+        guard index > 0 else { return 0 }
+
+        let precedingRowsHeight = fields.prefix(index).enumerated().reduce(CGFloat.zero) { partial, entry in
+            let lineCount = infoLineCount(
+                for: entry.element,
+                at: entry.offset,
+                fieldCount: fields.count
+            )
+            return partial + CGFloat(lineCount) * 20
+        }
+        return precedingRowsHeight + CGFloat(index) * 6
     }
 
     private var actionButtonBackgroundColumn: some View {

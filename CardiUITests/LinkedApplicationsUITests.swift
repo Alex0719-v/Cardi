@@ -60,6 +60,48 @@ final class LinkedApplicationsUITests: XCTestCase {
         discoverability.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
     }
 
+    func testExchangeDiagnosticsUnlocksFromVersionAndStartsRecording() throws {
+        let avatar = app.buttons["用户头像"]
+        XCTAssertTrue(avatar.waitForExistence(timeout: 4))
+        avatar.tap()
+
+        XCTAssertTrue(app.buttons["设置"].waitForExistence(timeout: 3))
+        app.buttons["设置"].tap()
+        XCTAssertTrue(app.buttons["帮助与关于"].waitForExistence(timeout: 2))
+        app.buttons["帮助与关于"].tap()
+
+        XCTAssertFalse(app.buttons["交换诊断"].exists)
+        let version = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "当前版本")
+        ).firstMatch
+        XCTAssertTrue(version.waitForExistence(timeout: 2))
+        for _ in 0..<7 {
+            version.tap()
+        }
+
+        let diagnostics = app.buttons["交换诊断"]
+        XCTAssertTrue(diagnostics.waitForExistence(timeout: 2))
+        diagnostics.tap()
+
+        let testCode = app.textFields["diagnostics.testCode"]
+        XCTAssertTrue(testCode.waitForExistence(timeout: 2))
+        testCode.tap()
+        testCode.typeText("123456")
+
+        let start = app.buttons["开始记录"]
+        XCTAssertTrue(start.isEnabled)
+        start.tap()
+        XCTAssertTrue(app.staticTexts["记录中"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["结束本次记录"].exists)
+
+        app.buttons["结束本次记录"].tap()
+        XCTAssertTrue(app.staticTexts["已停止"].waitForExistence(timeout: 2))
+        app.swipeUp()
+        let export = app.buttons["导出诊断 JSON"]
+        XCTAssertTrue(export.waitForExistence(timeout: 2))
+        XCTAssertTrue(export.isEnabled)
+    }
+
     func testBrowserListAndResetDefaultsStayInsideTheAccountSheet() throws {
         let avatar = app.buttons["用户头像"]
         XCTAssertTrue(avatar.waitForExistence(timeout: 4))

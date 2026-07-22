@@ -5,6 +5,7 @@
 
 import SwiftData
 import SwiftUI
+import MultipeerConnectivity
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -72,6 +73,15 @@ private struct PendingReceivedCardExchange: Identifiable, Equatable {
     static func == (lhs: PendingReceivedCardExchange, rhs: PendingReceivedCardExchange) -> Bool {
         lhs.id == rhs.id
     }
+}
+
+private struct ReceivedCardListOption: Identifiable, Equatable {
+    let id: UUID
+    let name: String
+}
+
+private struct ReceivedCardListPickerState: Equatable {
+    var selectedListID: UUID?
 }
 
 private extension CardExchangePayload {
@@ -179,6 +189,17 @@ struct MyCardsView: View {
         return myCards[min(selectedIndex, myCards.count - 1)]
     }
 
+    private var receivedCardListOptions: [ReceivedCardListOption] {
+        availableCardLists
+            .sorted {
+                if $0.sortOrder == $1.sortOrder {
+                    return $0.createdAt < $1.createdAt
+                }
+                return $0.sortOrder < $1.sortOrder
+            }
+            .map { ReceivedCardListOption(id: $0.id, name: $0.name) }
+    }
+
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .topLeading) {
@@ -241,6 +262,11 @@ struct MyCardsView: View {
                         cardCenterY: 268,
                         onFinished: { completedID in
                             if outgoingCardSnapshot.id == completedID {
+                                CardExchangeDiagnostics.shared.record(
+                                    stage: .animation,
+                                    name: "outgoing_animation_finished",
+                                    details: ["animationID": completedID.uuidString]
+                                )
                                 self.outgoingCardSnapshot = nil
                                 self.outgoingAnimationEndsAt = nil
                                 scheduleQueuedReceivedCardPresentation()
@@ -255,6 +281,7 @@ struct MyCardsView: View {
                     ReceivedCardExchangeOverlay(
                         exchange: pendingReceivedCard,
                         returnCard: currentCard?.renderData,
+                        listOptions: receivedCardListOptions,
                         width: min(370, proxy.size.width - 32),
                         screenSize: proxy.size,
                         cardTop: 326,
@@ -419,6 +446,15 @@ struct MyCardsView: View {
             }
         }
         .onChange(of: exchangeCoordinator.phase) { _, phase in
+            CardExchangeDiagnostics.shared.record(
+                stage: .lifecycle,
+                name: "exchange_phase_changed",
+                level: {
+                    if case .failed = phase { return .error }
+                    return .info
+                }(),
+                details: ["phase": phase.diagnosticCode]
+            )
             switch phase {
             case .listening, .unavailable, .noTarget, .failed:
                 resetExchangeDragOffset()
@@ -427,10 +463,16 @@ struct MyCardsView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
+            CardExchangeDiagnostics.shared.record(
+                stage: .lifecycle,
+                name: "scene_phase_changed",
+                details: ["phase": String(describing: phase)]
+            )
             if phase == .active {
                 refreshExchangeSession()
             } else {
                 exchangeCoordinator.stop()
+                CardExchangeDiagnostics.shared.flush()
                 resetExchangeDragOffset()
             }
         }
@@ -627,6 +669,9 @@ struct MyCardsView: View {
 
                 if shouldCommit {
                     exchangeCoordinator.commitThrowGesture()
+                    if !isExchangeTargetLocked {
+                        resetExchangeDragOffset()
+                    }
                 } else {
                     exchangeCoordinator.cancelThrowGesture()
                     resetExchangeDragOffset()
@@ -666,6 +711,11 @@ struct MyCardsView: View {
     private func resetExchangeDragOffset() {
         didPrimeExchangeGesture = false
         let resetID = UUID()
+        CardExchangeDiagnostics.shared.record(
+            stage: .animation,
+            name: "gesture_copy_reset_started",
+            details: ["resetID": resetID.uuidString]
+        )
         exchangeCopyResetID = resetID
         withAnimation(.snappy(duration: 0.2)) {
             exchangeDragOffset = 0
@@ -682,6 +732,11 @@ struct MyCardsView: View {
                 return
             }
             exchangeGestureCardCopy = nil
+            CardExchangeDiagnostics.shared.record(
+                stage: .animation,
+                name: "gesture_copy_reset_finished",
+                details: ["resetID": resetID.uuidString]
+            )
         }
     }
 
@@ -784,16 +839,36 @@ struct MyCardsView: View {
     }
 
     private func presentReceivedCard(_ delivery: CardExchangeIncomingDelivery) {
+        CardExchangeDiagnostics.shared.record(
+            stage: .animation,
+            name: "incoming_delivery_received_by_ui",
+            exchangeID: delivery.exchangeID,
+            peerIdentifier: delivery.peerID.displayName,
+            details: ["mode": delivery.mode.rawValue]
+        )
         let exchange = PendingReceivedCardExchange(delivery: delivery)
         let asksBecauseDuplicate = duplicatePolicy == .ask
             && matchingReceivedCard(for: delivery.payload) != nil
         if !confirmsIncomingCards && !asksBecauseDuplicate {
             if insertReceivedCard(delivery.payload) {
+                CardExchangeDiagnostics.shared.record(
+                    stage: .persistence,
+                    name: "incoming_card_auto_save_succeeded",
+                    exchangeID: delivery.exchangeID,
+                    peerIdentifier: delivery.peerID.displayName
+                )
                 _ = exchangeCoordinator.confirmIncomingPersisted(
                     delivery,
                     returnCard: nil
                 )
             } else {
+                CardExchangeDiagnostics.shared.record(
+                    stage: .persistence,
+                    name: "incoming_card_auto_save_failed",
+                    level: .error,
+                    exchangeID: delivery.exchangeID,
+                    peerIdentifier: delivery.peerID.displayName
+                )
                 exchangeCoordinator.reportIncomingPersistenceFailure(delivery)
             }
             return
@@ -809,6 +884,12 @@ struct MyCardsView: View {
     }
 
     private func showReceivedCard(_ exchange: PendingReceivedCardExchange) {
+        CardExchangeDiagnostics.shared.record(
+            stage: .animation,
+            name: "incoming_animation_presented",
+            exchangeID: exchange.delivery.exchangeID,
+            peerIdentifier: exchange.delivery.peerID.displayName
+        )
         withAnimation(.easeInOut(duration: 0.18)) {
             pendingReceivedCard = exchange
         }
@@ -847,17 +928,41 @@ struct MyCardsView: View {
     }
 
     @discardableResult
-    private func persistReceivedCard(_ id: UUID, shouldReturn: Bool) -> Bool {
+    private func persistReceivedCard(
+        _ id: UUID,
+        shouldReturn: Bool,
+        selectedListID: UUID?
+    ) -> Bool {
         guard let pendingReceivedCard, pendingReceivedCard.id == id else { return false }
         delayedReceiveWorkItem?.cancel()
         receiveScheduleID = UUID()
         let returnCard = shouldReturn ? currentCard?.renderData : nil
-        if insertReceivedCard(pendingReceivedCard.payload) {
+        if insertReceivedCard(
+            pendingReceivedCard.payload,
+            selectedListID: selectedListID
+        ) {
+            CardExchangeDiagnostics.shared.record(
+                stage: .persistence,
+                name: "incoming_card_manual_save_succeeded",
+                exchangeID: pendingReceivedCard.delivery.exchangeID,
+                peerIdentifier: pendingReceivedCard.delivery.peerID.displayName,
+                details: [
+                    "willReturnCard": String(shouldReturn),
+                    "listSelection": selectedListID == nil ? "default" : "explicit"
+                ]
+            )
             return exchangeCoordinator.confirmIncomingPersisted(
                 pendingReceivedCard.delivery,
                 returnCard: returnCard
             )
         } else {
+            CardExchangeDiagnostics.shared.record(
+                stage: .persistence,
+                name: "incoming_card_manual_save_failed",
+                level: .error,
+                exchangeID: pendingReceivedCard.delivery.exchangeID,
+                peerIdentifier: pendingReceivedCard.delivery.peerID.displayName
+            )
             exchangeCoordinator.reportIncomingPersistenceFailure(pendingReceivedCard.delivery)
             return false
         }
@@ -865,6 +970,12 @@ struct MyCardsView: View {
 
     private func completeReceivedCardAnimation(_ id: UUID) {
         guard let pendingReceivedCard, pendingReceivedCard.id == id else { return }
+        CardExchangeDiagnostics.shared.record(
+            stage: .animation,
+            name: "incoming_animation_finished",
+            exchangeID: pendingReceivedCard.delivery.exchangeID,
+            peerIdentifier: pendingReceivedCard.delivery.peerID.displayName
+        )
         withAnimation(.easeInOut(duration: 0.18)) {
             self.pendingReceivedCard = nil
         }
@@ -872,13 +983,20 @@ struct MyCardsView: View {
     }
 
     @discardableResult
-    private func insertReceivedCard(_ payload: CardExchangePayload) -> Bool {
+    private func insertReceivedCard(
+        _ payload: CardExchangePayload,
+        selectedListID: UUID? = nil
+    ) -> Bool {
+        let destinationListID = resolvedReceivedListID(selectedListID)
         if duplicatePolicy == .replace,
            let existingCard = matchingReceivedCard(for: payload) {
             replace(existingCard, with: payload)
+            if selectedListID != nil {
+                existingCard.cardListID = destinationListID
+            }
         } else {
             let card = payload.receivedBusinessCard()
-            card.cardListID = resolvedDefaultReceivedListID
+            card.cardListID = destinationListID
             modelContext.insert(card)
         }
 
@@ -903,6 +1021,13 @@ struct MyCardsView: View {
             return nil
         }
         return id
+    }
+
+    private func resolvedReceivedListID(_ selectedListID: UUID?) -> UUID? {
+        guard let selectedListID else { return resolvedDefaultReceivedListID }
+        return availableCardLists.contains(where: { $0.id == selectedListID })
+            ? selectedListID
+            : nil
     }
 
     private func matchingReceivedCard(for payload: CardExchangePayload) -> BusinessCard? {
@@ -960,8 +1085,22 @@ struct MyCardsView: View {
     }
 
     private func startOutgoingCardAnimation(_ mode: CardExchangeTransferMode) {
-        guard mode != .returnDelivery else { return }
-        guard let data = exchangeGestureCardCopy?.data ?? currentCard?.renderData else { return }
+        guard mode != .returnDelivery else {
+            CardExchangeDiagnostics.shared.record(
+                stage: .animation,
+                name: "return_animation_owned_by_receive_overlay"
+            )
+            return
+        }
+        guard let data = exchangeGestureCardCopy?.data ?? currentCard?.renderData else {
+            CardExchangeDiagnostics.shared.record(
+                stage: .animation,
+                name: "outgoing_animation_missing_card_snapshot",
+                level: .error,
+                details: ["mode": mode.rawValue]
+            )
+            return
+        }
         if outgoingCardSnapshot != nil {
             if outgoingAnimationEndsAt == nil {
                 outgoingAnimationEndsAt = Date().addingTimeInterval(OutgoingCardSendOffView.totalDuration)
@@ -974,6 +1113,14 @@ struct MyCardsView: View {
             initialYOffset: exchangeDragOffset - (isExchangeTargetLocked ? 12 : 0),
             initialScale: exchangeGestureScale,
             initialTilt: exchangeGestureTilt
+        )
+        CardExchangeDiagnostics.shared.record(
+            stage: .animation,
+            name: "outgoing_animation_started",
+            details: [
+                "mode": mode.rawValue,
+                "animationID": outgoingCardSnapshot?.id.uuidString ?? "missing"
+            ]
         )
         exchangeCopyResetID = UUID()
         var transaction = Transaction()
@@ -1211,12 +1358,13 @@ private struct ReceivedCardExchangeOverlay: View {
 
     let exchange: PendingReceivedCardExchange
     let returnCard: CardRenderData?
+    let listOptions: [ReceivedCardListOption]
     let width: CGFloat
     let screenSize: CGSize
     let cardTop: CGFloat
     let cardHolderIconCenter: CGPoint
     let onReject: (UUID) -> Void
-    let onPersist: (UUID, Bool) -> Bool
+    let onPersist: (UUID, Bool, UUID?) -> Bool
     let onAnimationFinished: (UUID) -> Void
 
     @State private var blurOpacity: Double = 0
@@ -1230,6 +1378,7 @@ private struct ReceivedCardExchangeOverlay: View {
     @State private var genieProgress: CGFloat = 0
     @State private var genieVisualOpacity: Double = 1
     @State private var returnOutgoingSnapshot: OutgoingCardSnapshot?
+    @State private var listPickerState: ReceivedCardListPickerState?
 
     private let entranceDuration: TimeInterval = 0.85
     private let blurDuration: TimeInterval = 0.3
@@ -1297,7 +1446,7 @@ private struct ReceivedCardExchangeOverlay: View {
                 title: "分到列表",
                 width: 112,
                 action: {
-                    startCollecting()
+                    presentListPicker()
                 }
             )
             .position(x: 330, y: 90)
@@ -1310,6 +1459,28 @@ private struct ReceivedCardExchangeOverlay: View {
                     .position(x: screenSize.width / 2, y: cardTop + height + 31)
                     .opacity(isCollecting ? 0 : blurOpacity)
                     .allowsHitTesting(false)
+            }
+
+            if listPickerState != nil {
+                Color.black.opacity(0.18)
+                    .frame(width: screenSize.width, height: screenSize.height)
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: dismissListPicker)
+                    .transition(.opacity)
+                    .zIndex(5)
+
+                ReceivedCardListPickerDialog(
+                    options: listOptions,
+                    selectedListID: Binding(
+                        get: { self.listPickerState?.selectedListID },
+                        set: { self.listPickerState?.selectedListID = $0 }
+                    ),
+                    onConfirm: confirmSelectedList,
+                    onCancel: dismissListPicker
+                )
+                .position(x: screenSize.width / 2, y: screenSize.height / 2)
+                .transition(.scale(scale: 0.96).combined(with: .opacity))
+                .zIndex(6)
             }
         }
         .frame(width: screenSize.width, height: screenSize.height)
@@ -1423,6 +1594,7 @@ private struct ReceivedCardExchangeOverlay: View {
         genieProgress = 0
         genieVisualOpacity = 1
         returnOutgoingSnapshot = nil
+        listPickerState = nil
 
         withAnimation(.easeInOut(duration: blurDuration)) {
             blurOpacity = 1
@@ -1444,17 +1616,56 @@ private struct ReceivedCardExchangeOverlay: View {
         }
         #endif
 
-        try? await Task.sleep(nanoseconds: UInt64(autoAcceptDelay * 1_000_000_000))
-        guard !Task.isCancelled else { return }
-        while isInteractingWithFlip, !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 150_000_000)
+        let timerInterval: TimeInterval = 0.1
+        var idleDuration: TimeInterval = 0
+        while idleDuration < autoAcceptDelay, !Task.isCancelled, !didFinish {
+            try? await Task.sleep(
+                nanoseconds: UInt64(timerInterval * 1_000_000_000)
+            )
+            if listPickerState == nil, !isInteractingWithFlip {
+                idleDuration += timerInterval
+            } else {
+                idleDuration = 0
+            }
         }
-        guard !didFinish else { return }
+        guard !Task.isCancelled, !didFinish, listPickerState == nil else { return }
         startCollecting()
     }
 
     @MainActor
-    private func startCollecting() {
+    private func presentListPicker() {
+        guard !isCollecting, !didFinish, listPickerState == nil else { return }
+        withAnimation(.snappy(duration: 0.2)) {
+            listPickerState = ReceivedCardListPickerState(selectedListID: nil)
+        }
+    }
+
+    @MainActor
+    private func dismissListPicker() {
+        withAnimation(.snappy(duration: 0.18)) {
+            listPickerState = nil
+        }
+    }
+
+    @MainActor
+    private func confirmSelectedList() {
+        guard
+            let selectedListID = listPickerState?.selectedListID,
+            listOptions.contains(where: { $0.id == selectedListID })
+        else {
+            return
+        }
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            listPickerState = nil
+        }
+        startCollecting(selectedListID: selectedListID)
+    }
+
+    @MainActor
+    private func startCollecting(selectedListID: UUID? = nil) {
         guard !isCollecting, !didFinish else { return }
         isCollecting = true
         prepareGenieCollector()
@@ -1465,7 +1676,7 @@ private struct ReceivedCardExchangeOverlay: View {
         Task {
             try? await Task.sleep(nanoseconds: UInt64(genieCollectDuration * 1_000_000_000))
             guard !Task.isCancelled else { return }
-            _ = onPersist(exchange.id, false)
+            _ = onPersist(exchange.id, false, selectedListID)
             didFinish = true
             onAnimationFinished(exchange.id)
         }
@@ -1492,7 +1703,7 @@ private struct ReceivedCardExchangeOverlay: View {
             )
             guard !Task.isCancelled, let returnCard else { return }
 
-            guard onPersist(exchange.id, true) else {
+            guard onPersist(exchange.id, true, nil) else {
                 didFinish = true
                 onAnimationFinished(exchange.id)
                 return
@@ -1530,6 +1741,137 @@ private struct ReceivedCardExchangeOverlay: View {
         didFinish = true
         returnOutgoingSnapshot = nil
         onAnimationFinished(exchange.id)
+    }
+}
+
+private struct ReceivedCardListPickerDialog: View {
+    let options: [ReceivedCardListOption]
+    @Binding var selectedListID: UUID?
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    private var canConfirm: Bool {
+        guard let selectedListID else { return false }
+        return options.contains(where: { $0.id == selectedListID })
+    }
+
+    private var listViewportHeight: CGFloat {
+        guard !options.isEmpty else { return 68 }
+        return min(CGFloat(options.count) * 52, 208)
+    }
+
+    private var dialogHeight: CGFloat {
+        58 + listViewportHeight + 16 + 49 + 9 + 48 + 14
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("选择名片列表")
+                .font(CardaTheme.pingFang(size: 17, weight: .semibold))
+                .foregroundStyle(Color.black)
+                .frame(height: 58)
+                .accessibilityIdentifier("exchange.listPicker.title")
+
+            if options.isEmpty {
+                Text("暂无现有列表\n请先在名片夹创建列表")
+                    .font(CardaTheme.pingFang(size: 15, weight: .regular))
+                    .foregroundStyle(Color.black.opacity(0.45))
+                    .multilineTextAlignment(.center)
+                    .frame(width: 272, height: listViewportHeight)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
+                            listOptionButton(option)
+
+                            if index < options.count - 1 {
+                                Rectangle()
+                                    .fill(Color.black.opacity(0.08))
+                                    .frame(height: 0.5)
+                                    .padding(.leading, 16)
+                            }
+                        }
+                    }
+                    .frame(width: 272)
+                }
+                .scrollIndicators(.hidden)
+                .frame(width: 272, height: listViewportHeight)
+            }
+
+            Button(action: onConfirm) {
+                Text("确认")
+                    .font(CardaTheme.pingFang(size: 17, weight: .regular))
+                    .foregroundStyle(.white)
+                    .frame(width: 272, height: 49)
+                    .background(
+                        Capsule()
+                            .fill(canConfirm ? Color.blue : Color.gray.opacity(0.45))
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(!canConfirm)
+            .padding(.top, 16)
+            .accessibilityIdentifier("exchange.listPicker.confirm")
+
+            Button(action: onCancel) {
+                Text("取消")
+                    .font(CardaTheme.pingFang(size: 17, weight: .regular))
+                    .foregroundStyle(CardaTheme.destructive)
+                    .frame(width: 272, height: 48)
+                    .background(
+                        Capsule()
+                            .fill(
+                                Color(red: 0.82, green: 0.82, blue: 0.84)
+                                    .opacity(0.72)
+                            )
+                    )
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 9)
+            .accessibilityIdentifier("exchange.listPicker.cancel")
+        }
+        .frame(width: 300, height: dialogHeight, alignment: .top)
+        .background(FigmaGlassShape(cornerRadius: 36))
+        .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
+    }
+
+    private func listOptionButton(_ option: ReceivedCardListOption) -> some View {
+        let isSelected = selectedListID == option.id
+
+        return Button {
+            selectedListID = option.id
+        } label: {
+            HStack(spacing: 12) {
+                Text(option.name)
+                    .font(CardaTheme.pingFang(size: 17, weight: .regular))
+                    .foregroundStyle(Color.black)
+                    .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                ZStack {
+                    Circle()
+                        .stroke(
+                            isSelected ? Color.blue : Color.black.opacity(0.2),
+                            lineWidth: 1.5
+                        )
+
+                    if isSelected {
+                        Circle()
+                            .fill(Color.blue)
+                            .padding(4)
+                    }
+                }
+                .frame(width: 20, height: 20)
+            }
+            .padding(.horizontal, 16)
+            .frame(width: 272, height: 51.5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(option.name)
+        .accessibilityValue(isSelected ? "已选择" : "未选择")
+        .accessibilityIdentifier("exchange.listPicker.option.\(option.id.uuidString)")
     }
 }
 

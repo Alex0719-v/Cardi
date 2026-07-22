@@ -29,6 +29,70 @@ final class CardExchangeSimulationUITests: XCTestCase {
         attachScreenshot(named: "exchange-mutual-persisted")
     }
 
+    func testAssignIncomingCardToSelectedExistingList() throws {
+        launchExchangeSimulation()
+
+        let assignButton = app.buttons["分到列表"]
+        XCTAssertTrue(assignButton.waitForExistence(timeout: 5))
+        assignButton.tap()
+
+        XCTAssertTrue(
+            app.staticTexts["exchange.listPicker.title"]
+                .waitForExistence(timeout: 3),
+            "点击分到列表后应显示列表选择弹窗"
+        )
+        XCTAssertTrue(
+            app.buttons["exchange.listPicker.cancel"].waitForExistence(timeout: 2),
+            "列表选择弹窗应显示取消按钮"
+        )
+
+        let listOptions = app.buttons.matching(
+            NSPredicate(
+                format: "identifier BEGINSWITH %@",
+                "exchange.listPicker.option."
+            )
+        )
+        let firstOption = listOptions.firstMatch
+        XCTAssertTrue(firstOption.waitForExistence(timeout: 3), "弹窗应显示现有列表")
+        let optionIdentifier = firstOption.identifier
+        firstOption.tap()
+        XCTAssertEqual(firstOption.value as? String, "已选择")
+        attachScreenshot(named: "exchange-list-picker-selected")
+
+        let confirmButton = app.buttons["exchange.listPicker.confirm"]
+        XCTAssertTrue(confirmButton.isEnabled)
+        confirmButton.tap()
+
+        XCTAssertTrue(
+            waitForNonExistence(app.buttons["拒绝"], timeout: 5),
+            "确认列表后应完成收纳并关闭接收层"
+        )
+
+        let selectedListID = optionIdentifier.replacingOccurrences(
+            of: "exchange.listPicker.option.",
+            with: ""
+        )
+        app.buttons["名片夹"].tap()
+
+        let listMode = app.buttons["card-holder-mode-列表"]
+        XCTAssertTrue(listMode.waitForExistence(timeout: 3))
+        listMode.tap()
+
+        let selectedListRow = app.descendants(matching: .any)[
+            "card-holder-list-\(selectedListID)"
+        ]
+        XCTAssertTrue(
+            selectedListRow.waitForExistence(timeout: 4),
+            "所选列表应继续存在于名片夹"
+        )
+        selectedListRow.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["模拟对方"].waitForExistence(timeout: 4),
+            "收到的名片应归入刚才确认的列表"
+        )
+        attachScreenshot(named: "exchange-assigned-to-selected-list")
+    }
+
     func testSingleDeliveryCanAutomaticallyFlipPersistAndReturn() throws {
         launchExchangeSimulation(singleDelivery: true, autoReturn: true)
 

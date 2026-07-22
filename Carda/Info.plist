@@ -49,7 +49,7 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Cardi uses the local network to discover nearby Cardi users for business card exchange.</string>
 	<key>NSNearbyInteractionUsageDescription</key>
-	<string>用于确认面对面递卡对象的相对距离与方向。</string>
+	<string>用于确认面对面递卡对象的相对距离，并在设备支持时确认方向。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Cardi needs permission to save business card images to your photo library.</string>
 	<key>UIApplicationSceneManifest</key>

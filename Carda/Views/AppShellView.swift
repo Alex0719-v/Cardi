@@ -551,6 +551,35 @@ struct AppShellView: View {
                     receivedAt: Date()
                 )
             )
+            if ProcessInfo.processInfo.environment[
+                "CARDA_SEED_CARD_HOLDER_BATCH_TEST_DATA"
+            ] == "1" {
+                let batchCards = [
+                    ("批量移动测试甲", "Batch Move A", "batch-a@carda.local"),
+                    ("批量移动测试乙", "Batch Move B", "batch-b@carda.local")
+                ]
+                for (index, card) in batchCards.enumerated() {
+                    modelContext.insert(
+                        BusinessCard(
+                            ownerKind: .received,
+                            name: card.0,
+                            phoneticName: card.1,
+                            position: "拖放测试",
+                            organizationName: "Batch",
+                            fields: [
+                                CardInfoField(
+                                    kind: .email,
+                                    value: card.2,
+                                    sortOrder: 0
+                                )
+                            ],
+                            receivedAt: Date().addingTimeInterval(
+                                -TimeInterval(index + 1)
+                            )
+                        )
+                    )
+                }
+            }
             try modelContext.save()
 
             storedAccountAvatarImageData = Data()
