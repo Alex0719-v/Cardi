@@ -10,6 +10,12 @@ import Foundation
 import UIKit
 #endif
 
+extension Notification.Name {
+    static let cardExchangeDiagnosticsDidStart = Notification.Name(
+        "Cardi.cardExchangeDiagnosticsDidStart"
+    )
+}
+
 nonisolated enum CardExchangeDiagnosticRole: String, CaseIterable, Codable, Identifiable, Sendable {
     case deviceA = "A"
     case deviceB = "B"

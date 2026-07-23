@@ -91,6 +91,18 @@ final class LinkedApplicationsUITests: XCTestCase {
         let start = app.buttons["开始记录"]
         XCTAssertTrue(start.isEnabled)
         start.tap()
+        XCTAssertTrue(
+            app.staticTexts["我的名片"].waitForExistence(timeout: 3),
+            "开始诊断后应自动关闭账户 Sheet 并返回我的名片"
+        )
+
+        avatar.tap()
+        XCTAssertTrue(app.buttons["设置"].waitForExistence(timeout: 3))
+        app.buttons["设置"].tap()
+        XCTAssertTrue(app.buttons["帮助与关于"].waitForExistence(timeout: 2))
+        app.buttons["帮助与关于"].tap()
+        XCTAssertTrue(app.buttons["交换诊断"].waitForExistence(timeout: 2))
+        app.buttons["交换诊断"].tap()
         XCTAssertTrue(app.staticTexts["记录中"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["结束本次记录"].exists)
 

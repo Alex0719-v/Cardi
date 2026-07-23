@@ -210,6 +210,14 @@ struct CardExchangeDiagnosticsPage: View {
             presentedAlert = .invalidCode
             return
         }
+        diagnostics.record(
+            stage: .lifecycle,
+            name: "diagnostic_return_to_my_cards_requested"
+        )
+        NotificationCenter.default.post(
+            name: .cardExchangeDiagnosticsDidStart,
+            object: nil
+        )
     }
 
     private func prepareExport() {

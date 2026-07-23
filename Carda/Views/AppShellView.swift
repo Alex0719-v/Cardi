@@ -173,6 +173,14 @@ struct AppShellView: View {
                 archiveCurrentAccountIfNeeded()
             }
         }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .cardExchangeDiagnosticsDidStart
+            )
+        ) { _ in
+            isSearchActive = false
+            selectedSection = .myCards
+        }
         .task {
             #if DEBUG && targetEnvironment(simulator)
             resetDefaultCardSortForUITestsIfNeeded()

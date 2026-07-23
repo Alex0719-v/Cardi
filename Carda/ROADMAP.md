@@ -315,7 +315,8 @@
 - 测试计划：`ExchangeTestPlan.md` 已覆盖构建、权限、生命周期、手势、发现、UWB 距离/方向、多人目标、单向、互换、回递、数据、并发、断线、性能、安全与商店发布。
 - 已通过：Debug / Release Simulator 构建、generic iOS device arm64 无签名 Release 构建、互换模拟、单向来卡自动翻面回递模拟、3 条交换模拟 UI 自动化（含选择现有列表并验证归属）、1 条隐藏诊断入口 UI 自动化、目标选择边界与诊断隐私逻辑测试。
 - 接收归类：`分到列表` 已改为先显示现有列表单选弹窗；列表区域直接继承弹窗玻璃材质，不显示独立灰色块，并提供取消按钮与外部遮罩关闭；确认后收纳、保存到明确选择的列表并发送 ACK，弹窗期间暂停并重置自动接收计时，无列表时禁用确认。
-- 诊断能力：已加入 Release/TestFlight 可用的隐藏交换诊断入口、双机测试编号、匿名 peer 摘要、源码位置与事件时间线，并新增入口解锁及开始/结束记录 UI 回归；下一轮双真机测试必须同时导出 A/B 两份 JSON。
+- 诊断能力：已加入 Release/TestFlight 可用的隐藏交换诊断入口、双机测试编号、匿名 peer 摘要、源码位置与事件时间线；开始记录后会自动关闭账户 Sheet、退出搜索并回到“我的名片”，20pt 以上但未进入协调器的上划会记录固定拒绝原因。入口解锁、自动返回、开始/结束与导出已有 UI 回归；下一轮双真机测试必须同时导出 A/B 两份 JSON。
+- 2026-07-23 真机诊断 `050212`：A 包只有 `recording_started`，没有协调器或广播；B 包虽多次出现 `advertising_started`，但始终无 peer、无 `gesture_primed`，证明失败发生在 discovery 之前。已修复开始记录仍停留在账户 Sheet 的流程；修复后模拟器生成的 JSON 已依次包含 `diagnostic_return_to_my_cards_requested`、`advertising_started` 与 `exchange_coordinator_started`。真实双机发现/NI/传输仍需用含该修复的新 TestFlight 构建复测。
 - 已修复 P0：发送事务现有 12 秒 ACK 超时；transport 未连接或发送抛错会显式失败；对端 `.error`、断线与超时会统一清除 intent、outgoing transaction、browser 和 timeout task，后续上划可恢复。
 - 仍待修复 P0：最大校验通过 payload 编码后为 16,845,575 字节，超过 14,680,064 字节接收上限；NI 权限拒绝仍缺少终止重试与 Settings 引导。
 - Release 可执行文件已确认不含交换模拟入口，但应用包仍包含内部 Markdown 文档；正式归档前需从 Target Resources 排除并复查。
@@ -345,7 +346,7 @@
 
 3. 测试策略 `[doing]`
 - 目标：覆盖名片布局计算、排序、搜索、保存图片以及交换目标选择、payload、状态机、持久化 ACK 和 UI 动画。
-- 当前：交换已新增 `CardExchangeTargetSelectorTests`、`CardExchangePayloadValidationTests`、`CardExchangeDiagnosticsPrivacyTests`、`CardExchangeSimulationUITests`，并覆盖诊断编号规范化、匿名 peer JSON、隐藏入口解锁、开始、结束和可导出状态；完整矩阵见 `ExchangeTestPlan.md`。Coordinator 仍需依赖注入后补齐 send/ACK/断线/权限故障测试。
+- 当前：交换已新增 `CardExchangeTargetSelectorTests`、`CardExchangePayloadValidationTests`、`CardExchangeDiagnosticsPrivacyTests`、`CardExchangeSimulationUITests`，并覆盖诊断编号规范化、匿名 peer JSON、隐藏入口解锁、开始后自动返回“我的名片”、结束和可导出状态；完整矩阵见 `ExchangeTestPlan.md`。Coordinator 仍需依赖注入后补齐 send/ACK/断线/权限故障测试。
 - 验收：核心纯逻辑可自动测试，交换关键状态可故障注入，双真机端到端证据可复核。
 
 4. 文档同步机制 `[doing]`

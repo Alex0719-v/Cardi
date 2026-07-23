@@ -431,6 +431,13 @@ struct MyCardsView: View {
         .onChange(of: isAddSheetPresented) { _, _ in
             refreshExchangeSession()
         }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .cardExchangeDiagnosticsDidStart
+            )
+        ) { _ in
+            isAddSheetPresented = false
+        }
         .onChange(of: editorMode?.id) { _, _ in
             refreshExchangeSession()
         }
@@ -661,7 +668,22 @@ struct MyCardsView: View {
                 exchangeGestureTilt = -Double(min(5, predictedExtra / 32))
             }
             .onEnded { value in
-                guard didPrimeExchangeGesture else { return }
+                guard didPrimeExchangeGesture else {
+                    let upwardDistance = max(0, -value.translation.height)
+                    guard upwardDistance >= 20 else { return }
+                    CardExchangeDiagnostics.shared.record(
+                        stage: .gesture,
+                        name: "gesture_attempt_rejected_by_ui",
+                        level: .warning,
+                        details: [
+                            "reason": cardExchangeSwipeRejectionReason(
+                                value,
+                                cardWidth: cardWidth
+                            ) ?? "coordinator_rejected"
+                        ]
+                    )
+                    return
+                }
                 let measured = -value.translation.height
                 let predicted = -value.predictedEndTranslation.height
                 let shouldCommit = measured >= 120 || predicted >= 168
@@ -706,6 +728,41 @@ struct MyCardsView: View {
             height: cardHeight
         )
         return cardFrame.contains(value.startLocation)
+    }
+
+    private func cardExchangeSwipeRejectionReason(
+        _ value: DragGesture.Value,
+        cardWidth: CGFloat
+    ) -> String? {
+        if !allowsNearbyDiscovery { return "nearby_discovery_disabled" }
+        guard let currentCard else { return "no_current_card" }
+        if isSettlingCardPage { return "card_page_settling" }
+        if isContextMenuVisible { return "context_menu_visible" }
+        if outgoingCardSnapshot != nil { return "outgoing_animation_active" }
+        if pendingReceivedCard != nil { return "incoming_card_pending" }
+        if exchangeGestureCardCopy != nil, !didPrimeExchangeGesture {
+            return "gesture_copy_busy"
+        }
+        if editorMode != nil { return "editor_presented" }
+        if isAddSheetPresented { return "account_sheet_presented" }
+        if value.translation.height >= 0 { return "not_upward" }
+        if abs(value.translation.height) <= abs(value.translation.width) * 1.1 {
+            return "not_vertical_enough"
+        }
+
+        let cardHeight =
+            CardLayoutCalculator.height(for: currentCard.renderData)
+            * cardWidth / CardaTheme.cardWidth
+        let cardFrame = CGRect(
+            x: (CardaTheme.canvasWidth - cardWidth) / 2,
+            y: 268 - cardHeight / 2,
+            width: cardWidth,
+            height: cardHeight
+        )
+        if !cardFrame.contains(value.startLocation) {
+            return "started_outside_card"
+        }
+        return nil
     }
 
     private func resetExchangeDragOffset() {
@@ -2297,6 +2354,13 @@ struct AddCardSheet: View {
                     dismissButton: .default(Text("好"))
                 )
             }
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: .cardExchangeDiagnosticsDidStart
+            )
+        ) { _ in
+            dismiss()
         }
     }
 
