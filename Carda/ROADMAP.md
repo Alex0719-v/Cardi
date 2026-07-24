@@ -224,7 +224,7 @@
 - Figma：`10681:4430`
 - 目标：点击右上角头像后页面变暗，Sheet 初始顶边为 y=409；上拉 grabber 后展开到 y=62。按新稿显示添加名片、登录信息、设置、关联应用与退出登录。
 - 当前：内容块使用 50% `SearchBackground`，“添加名片”保持灰色跑道与黑色文字；`设置 / 关联应用` 已合并为 370 x 104pt 两行圆角组件，与红色文字的 `退出登录` 保持 27pt。账户页新增手机号并以其作为本机账户标识，顶部/头像/输入组件间距各收紧 16pt，底部显示“仅本地登录、不可跨设备同步”说明。退出登录已接入确认、按手机号目录归档、清空 SwiftData 与同手机号恢复流程。`设置` 已完成名片交换、名片管理、数据与存储、交互与辅助功能、帮助与关于五组，并按确认移除独立的隐私安全与通知组；偏好已经接入交换、接收、排序、重复处理、删除确认、反馈、动画、字体和翻页行为，数据页支持同手机号 JSON 备份恢复及带确认的本地数据删除。关联应用总览与浏览器/邮箱/地图选择页共用账户 Sheet 内部 `NavigationStack`，不创建二级 Sheet；总览保留 Figma `10924:15888` / `10924:15889` 的 17pt 居中标题、x=16/y=16 的 44pt 圆形返回按钮和 370 x 156pt 三行组件。总览三行与邮箱选择页均移除左侧图标，三行组件下方 27pt 增加红色文字、带原生确认弹窗的 `恢复默认设置`。当前浏览器支持 Safari、Chrome、夸克、QQ浏览器、Edge、UC，并使用本地黑色单色品牌 SVG；邮箱支持邮件、QQ 邮箱、网易邮箱大师、Outlook、Gmail；地图支持 Apple、高德、百度、Google Maps、Waze。仅展示 `canOpenURL` 检测为已安装的软件，偏好只写入 Cardi `UserDefaults`，不可用时降级到系统默认项。
-- 交换诊断：`帮助与关于` 当前版本行连续轻点 7 次后显示隐藏入口；两台真机可使用同一六位编号和 A/B 标记记录并导出脱敏 JSON，覆盖发现、连接、token、测距/方向、目标选择、意图、传输、持久化与动画，最近保留 5 次 `[done]`
+- 交换诊断：`设置 → 帮助与关于 → 交换诊断` 为常驻入口，不再需要连续点击版本号；两台真机可使用同一六位编号和 A/B 标记记录并导出脱敏 JSON，覆盖发现、连接、token、测距/方向、目标选择、意图、传输、持久化与动画，最近保留 5 次 `[done]`
 - 验收：点击“添加名片”进入创建/编辑名片页；点击“设置”“关联应用”及任一子项后只发生同一 Sheet 内的水平 push，不创建新的 Sheet、遮罩或 grabber；返回时沿相反方向滑回，原 detent 与拖拽状态保持不变。设置首页只显示已确认的五组，开关与选择可持久化并影响对应业务，备份禁止跨手机号恢复，破坏性操作必须先确认。关联应用总览和邮箱选择页没有左侧图标；浏览器顺序、品牌标志、选择持久化正确；恢复确认的取消不改值、确认同时恢复三项默认值；邮箱、地址和链接按钮按选择跳转，应用卸载或打开失败时正确降级并提示。
 - 真机待验：第三方 App URL Scheme 的安装检测与实际唤起必须在安装对应 App 的 iPhone 上完成最终回归；模拟器只验证导航、动态列表、选择持久化和降级逻辑。夸克、QQ浏览器、UC浏览器当前采用“尝试直达，复制网址后降级到 App 主页”的保守路径；QQ 邮箱与网易邮箱大师采用“复制收件人后打开 App”的路径。
 
@@ -313,9 +313,9 @@
 
 4. 上线前交换完整测试 `[doing]`
 - 测试计划：`ExchangeTestPlan.md` 已覆盖构建、权限、生命周期、手势、发现、UWB 距离/方向、多人目标、单向、互换、回递、数据、并发、断线、性能、安全与商店发布。
-- 已通过：Debug / Release Simulator 构建、generic iOS device arm64 无签名 Release 构建、互换模拟、单向来卡自动翻面回递模拟、3 条交换模拟 UI 自动化（含选择现有列表并验证归属）、1 条隐藏诊断入口 UI 自动化、目标选择边界与诊断隐私逻辑测试。
+- 已通过：Debug / Release Simulator 构建、generic iOS device arm64 无签名 Release 构建、互换模拟、单向来卡自动翻面回递模拟、3 条交换模拟 UI 自动化（含选择现有列表并验证归属）、1 条常驻诊断入口 UI 自动化、目标选择边界与诊断隐私逻辑测试。
 - 接收归类：`分到列表` 已改为先显示现有列表单选弹窗；列表区域直接继承弹窗玻璃材质，不显示独立灰色块，并提供取消按钮与外部遮罩关闭；确认后收纳、保存到明确选择的列表并发送 ACK，弹窗期间暂停并重置自动接收计时，无列表时禁用确认。
-- 诊断能力：已加入 Release/TestFlight 可用的隐藏交换诊断入口、双机测试编号、匿名 peer 摘要、源码位置与事件时间线；开始记录后会自动关闭账户 Sheet、退出搜索并回到“我的名片”，20pt 以上但未进入协调器的上划会记录固定拒绝原因。入口解锁、自动返回、开始/结束与导出已有 UI 回归；下一轮双真机测试必须同时导出 A/B 两份 JSON。
+- 诊断能力：已加入 Release/TestFlight 可用的常驻交换诊断入口、双机测试编号、匿名 peer 摘要、源码位置与事件时间线；开始记录后会自动关闭账户 Sheet、退出搜索并回到“我的名片”，20pt 以上但未进入协调器的上划会记录固定拒绝原因。入口显示、自动返回、开始/结束与导出已有 UI 回归；下一轮双真机测试必须同时导出 A/B 两份 JSON。
 - 2026-07-23 真机诊断 `050212`：A 包只有 `recording_started`，没有协调器或广播；B 包虽多次出现 `advertising_started`，但始终无 peer、无 `gesture_primed`，证明失败发生在 discovery 之前。已修复开始记录仍停留在账户 Sheet 的流程；修复后模拟器生成的 JSON 已依次包含 `diagnostic_return_to_my_cards_requested`、`advertising_started` 与 `exchange_coordinator_started`。真实双机发现/NI/传输仍需用含该修复的新 TestFlight 构建复测。
 - 已修复 P0：发送事务现有 12 秒 ACK 超时；transport 未连接或发送抛错会显式失败；对端 `.error`、断线与超时会统一清除 intent、outgoing transaction、browser 和 timeout task，后续上划可恢复。
 - 仍待修复 P0：最大校验通过 payload 编码后为 16,845,575 字节，超过 14,680,064 字节接收上限；NI 权限拒绝仍缺少终止重试与 Settings 引导。
@@ -346,7 +346,7 @@
 
 3. 测试策略 `[doing]`
 - 目标：覆盖名片布局计算、排序、搜索、保存图片以及交换目标选择、payload、状态机、持久化 ACK 和 UI 动画。
-- 当前：交换已新增 `CardExchangeTargetSelectorTests`、`CardExchangePayloadValidationTests`、`CardExchangeDiagnosticsPrivacyTests`、`CardExchangeSimulationUITests`，并覆盖诊断编号规范化、匿名 peer JSON、隐藏入口解锁、开始后自动返回“我的名片”、结束和可导出状态；完整矩阵见 `ExchangeTestPlan.md`。Coordinator 仍需依赖注入后补齐 send/ACK/断线/权限故障测试。
+- 当前：交换已新增 `CardExchangeTargetSelectorTests`、`CardExchangePayloadValidationTests`、`CardExchangeDiagnosticsPrivacyTests`、`CardExchangeSimulationUITests`，并覆盖诊断编号规范化、匿名 peer JSON、常驻入口显示、开始后自动返回“我的名片”、结束和可导出状态；完整矩阵见 `ExchangeTestPlan.md`。Coordinator 仍需依赖注入后补齐 send/ACK/断线/权限故障测试。
 - 验收：核心纯逻辑可自动测试，交换关键状态可故障注入，双真机端到端证据可复核。
 
 4. 文档同步机制 `[doing]`

@@ -533,10 +533,6 @@ private struct DataStorageSettingsPage: View {
 }
 
 private struct HelpAboutSettingsPage: View {
-    @StateObject private var exchangeDiagnostics = CardExchangeDiagnostics.shared
-    @State private var diagnosticUnlockTapCount = 0
-    @State private var diagnosticsUnlocked = false
-
     private var appVersion: String {
         let version = Bundle.main.object(
             forInfoDictionaryKey: "CFBundleShortVersionString"
@@ -583,18 +579,13 @@ private struct HelpAboutSettingsPage: View {
                 }
 
                 Section("关于") {
-                    Button(action: registerVersionTap) {
-                        settingsValueRow(title: "当前版本", value: appVersion)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+                    settingsValueRow(title: "当前版本", value: appVersion)
 
-                    if diagnosticsUnlocked || exchangeDiagnostics.isRecording {
-                        NavigationLink("交换诊断") {
-                            CardExchangeDiagnosticsPage()
-                        }
-                        .accessibilityIdentifier("settings.exchangeDiagnostics")
+                    NavigationLink("交换诊断") {
+                        CardExchangeDiagnosticsPage()
                     }
+                    .accessibilityIdentifier("settings.exchangeDiagnostics")
+
                     NavigationLink("隐私政策") {
                         SettingsTextPage(
                             title: "隐私政策",
@@ -618,15 +609,6 @@ private struct HelpAboutSettingsPage: View {
             .cardaSettingsFormStyle()
         }
         .cardaSettingsPageStyle()
-    }
-
-    private func registerVersionTap() {
-        guard !diagnosticsUnlocked else { return }
-        diagnosticUnlockTapCount += 1
-        if diagnosticUnlockTapCount >= 7 {
-            diagnosticsUnlocked = true
-            diagnosticUnlockTapCount = 0
-        }
     }
 }
 

@@ -60,7 +60,7 @@ final class LinkedApplicationsUITests: XCTestCase {
         discoverability.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
     }
 
-    func testExchangeDiagnosticsUnlocksFromVersionAndStartsRecording() throws {
+    func testExchangeDiagnosticsIsAlwaysVisibleAndStartsRecording() throws {
         let avatar = app.buttons["用户头像"]
         XCTAssertTrue(avatar.waitForExistence(timeout: 4))
         avatar.tap()
@@ -70,17 +70,11 @@ final class LinkedApplicationsUITests: XCTestCase {
         XCTAssertTrue(app.buttons["帮助与关于"].waitForExistence(timeout: 2))
         app.buttons["帮助与关于"].tap()
 
-        XCTAssertFalse(app.buttons["交换诊断"].exists)
-        let version = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@", "当前版本")
-        ).firstMatch
-        XCTAssertTrue(version.waitForExistence(timeout: 2))
-        for _ in 0..<7 {
-            version.tap()
-        }
-
         let diagnostics = app.buttons["交换诊断"]
-        XCTAssertTrue(diagnostics.waitForExistence(timeout: 2))
+        XCTAssertTrue(
+            diagnostics.waitForExistence(timeout: 2),
+            "交换诊断应作为帮助与关于中的常驻入口"
+        )
         diagnostics.tap()
 
         let testCode = app.textFields["diagnostics.testCode"]
