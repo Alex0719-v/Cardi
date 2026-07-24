@@ -112,6 +112,37 @@ final class CardExchangeSimulationUITests: XCTestCase {
         attachScreenshot(named: "exchange-single-returned")
     }
 
+    func testUpwardCardDragPrimesRealDiscoveryGesture() throws {
+        app = XCUIApplication()
+        app.launchEnvironment["CARDA_ENABLE_EXCHANGE_SIMULATION"] = "1"
+        app.launch()
+
+        XCTAssertTrue(app.buttons["debug.simulateExchange"].waitForExistence(timeout: 4))
+
+        let window = app.windows.firstMatch
+        let dragStart = window.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)
+        )
+        let dragEnd = window.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.10)
+        )
+        dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+
+        let feedback = app.staticTexts["exchange.feedback"]
+        XCTAssertTrue(
+            feedback.waitForExistence(timeout: 1),
+            "从当前名片内上划应进入真实交换手势链路并显示当前交换状态。\n\(app.debugDescription)"
+        )
+        XCTAssertTrue(
+            [
+                "当前设备不支持近距离测距",
+                "正在寻找附近可接收的人",
+                "正在确认最近的接收者"
+            ].contains(feedback.label),
+            "真实上划应到达 NI 能力检查或附近发现阶段，实际状态：\(feedback.label)"
+        )
+    }
+
     private func launchExchangeSimulation(
         singleDelivery: Bool = false,
         autoReturn: Bool = false

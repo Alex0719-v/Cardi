@@ -119,6 +119,7 @@ struct MyCardsView: View {
     fileprivate static let cardSpacing: CGFloat = 32
     fileprivate static let pageAnimationDuration: TimeInterval = 0.18
     fileprivate static let bottomNavigationExclusionTop: CGFloat = 779
+    private static let gestureCoordinateSpace = "my-cards-canvas"
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
@@ -342,6 +343,7 @@ struct MyCardsView: View {
                         .background(Capsule().fill(Color.black.opacity(0.72)))
                         .position(x: proxy.size.width / 2, y: 600)
                         .transition(.opacity.combined(with: .scale))
+                        .accessibilityIdentifier("exchange.feedback")
                 }
 
                 #if DEBUG && targetEnvironment(simulator)
@@ -361,11 +363,9 @@ struct MyCardsView: View {
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
             .contentShape(Rectangle())
+            .coordinateSpace(name: Self.gestureCoordinateSpace)
             .simultaneousGesture(
                 cardPageSwipeGesture(cardWidth: min(370, proxy.size.width - 32))
-            )
-            .simultaneousGesture(
-                cardExchangeSwipeGesture(cardWidth: min(370, proxy.size.width - 32))
             )
         }
         .sheet(isPresented: $isAddSheetPresented) {
@@ -585,6 +585,9 @@ struct MyCardsView: View {
                     }
                 }
         )
+        .simultaneousGesture(
+            cardExchangeSwipeGesture(cardWidth: width)
+        )
         .onTapGesture {
             withAnimation(.snappy(duration: 0.18)) {
                 isContextMenuVisible = false
@@ -640,7 +643,10 @@ struct MyCardsView: View {
     }
 
     private func cardExchangeSwipeGesture(cardWidth: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 3, coordinateSpace: .local)
+        DragGesture(
+            minimumDistance: 3,
+            coordinateSpace: .named(Self.gestureCoordinateSpace)
+        )
             .onChanged { value in
                 guard canHandleCardExchangeSwipe(value, cardWidth: cardWidth) else { return }
                 let upwardDistance = max(0, -value.translation.height)

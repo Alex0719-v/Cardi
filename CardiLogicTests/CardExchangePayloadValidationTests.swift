@@ -19,12 +19,19 @@ struct CardInfoField {
     var sortOrder: Int
 }
 
+enum CardBackgroundTemplate: String, Codable, Hashable {
+    case color1
+    case color2
+    case color3
+}
+
 struct CardRenderData {
     var id: UUID
     var name: String
     var phoneticName: String
     var position: String
     var organizationName: String
+    var backgroundTemplate: CardBackgroundTemplate
     var avatarImageData: Data?
     var companyLogoImageData: Data?
     var fields: [CardFieldDraft]
@@ -42,6 +49,7 @@ final class BusinessCard {
         phoneticName: String,
         position: String,
         organizationName: String,
+        backgroundTemplate: CardBackgroundTemplate,
         avatarImageData: Data?,
         companyLogoImageData: Data?,
         fields: [CardInfoField],
@@ -135,6 +143,7 @@ private enum CardExchangePayloadValidationTests {
             phoneticName: repeated("p", count: 256),
             position: repeated("j", count: 256),
             organizationName: repeated("o", count: 512),
+            backgroundTemplate: .color3,
             avatarImageData: Data(count: imageLimit),
             companyLogoImageData: Data(count: imageLimit),
             fields: fields
